@@ -12,6 +12,7 @@ const authRoutes = require('./routes/auth');
 const petRoutes = require('./routes/pets');
 const healthRoutes = require('./routes/health');
 const reminderRoutes = require('./routes/reminders');
+const vetRoutes = require('./routes/vets');
 
 // Initialize express app
 const app = express();
@@ -36,6 +37,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/pets', petRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/reminders', reminderRoutes);
+app.use('/api/vets', vetRoutes);
 
 // Health check route
 app.get('/api/health-check', (req, res) => {
