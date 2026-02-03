@@ -37,7 +37,11 @@ router.put(
     protect,
     updateProfileValidator,
     validate,
-    authController.updateProfile
 );
+
+// @route   PUT /api/auth/password
+// @desc    Change user password
+// @access  Private
+router.put('/password', protect, authController.changePassword);
 
 module.exports = router;

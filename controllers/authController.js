@@ -162,3 +162,36 @@ exports.updateProfile = async (req, res, next) => {
         next(error);
     }
 };
+/**
+ * @desc    Change user password
+ * @route   PUT /api/auth/password
+ * @access  Private
+ */
+exports.changePassword = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        // Get user with password
+        const user = await User.findById(req.user.id).select('+password');
+
+        // Check current password
+        const isMatch = await user.comparePassword(currentPassword);
+        if (!isMatch) {
+            return res.status(401).json({
+                success: false,
+                message: 'Current password is incorrect',
+            });
+        }
+
+        // Set new password
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Password updated successfully',
+        });
+    } catch (error) {
+        next(error);
+    }
+};

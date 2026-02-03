@@ -175,17 +175,8 @@ exports.uploadPhoto = async (req, res, next) => {
             });
         }
 
-        // Delete old photo if exists
-        if (pet.photo) {
-            try {
-                await fs.unlink(path.join(__dirname, '..', pet.photo));
-            } catch (err) {
-                console.error('Error deleting old photo:', err);
-            }
-        }
-
-        // Update pet with new photo path
-        pet.photo = `/uploads/pets/${req.file.filename}`;
+        // Update pet with new photo path (Cloudinary URL)
+        pet.photo = req.file.path;
         await pet.save();
 
         res.status(200).json({
