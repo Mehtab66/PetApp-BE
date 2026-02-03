@@ -15,10 +15,14 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const dKm = R * c; // Distance in km
     const dMi = dKm * 0.621371; // Distance in miles
 
+    let text = '';
     if (dMi < 0.1) {
-        return (dKm * 1000).toFixed(0) + ' m';
+        text = (dKm * 1000).toFixed(0) + ' m';
+    } else {
+        text = `${dMi.toFixed(1)} miles`;
     }
-    return `${dMi.toFixed(1)} miles`;
+
+    return { text, value: dMi };
 };
 
 /**
@@ -58,7 +62,7 @@ exports.getNearbyVets = async (req, res, next) => {
         const response = await axios.get(url);
 
         const vets = await Promise.all(response.data.results.map(async (place) => {
-            const distanceValue = lat && lng ? calculateDistance(targetLat, targetLng, place.geometry.location.lat, place.geometry.location.lng) : 'Nearby';
+            const distanceObj = lat && lng ? calculateDistance(targetLat, targetLng, place.geometry.location.lat, place.geometry.location.lng) : { text: 'Nearby', value: 0 };
             const details = await fetchPlaceDetails(place.place_id);
 
             return {
@@ -66,7 +70,8 @@ exports.getNearbyVets = async (req, res, next) => {
                 name: place.name,
                 description: place.types.includes('pet_store') ? 'Pet Store & Clinic' : 'Veterinary Hospital',
                 address: place.vicinity,
-                distance: distanceValue,
+                distance: distanceObj.text,
+                distanceSortValue: distanceObj.value,
                 rating: place.rating || 0,
                 phone: details.phone,
                 openNow: place.opening_hours ? place.opening_hours.open_now : false,
@@ -75,9 +80,12 @@ exports.getNearbyVets = async (req, res, next) => {
             };
         }));
 
+        // Sort vets by distance (nearest first)
+        const sortedVets = vets.sort((a, b) => a.distanceSortValue - b.distanceSortValue);
+
         res.status(200).json({
             success: true,
-            data: { vets }
+            data: { vets: sortedVets }
         });
     } catch (error) {
         console.error('Fetch Nearby Vets Error:', error.message);
@@ -111,6 +119,7 @@ exports.searchVets = async (req, res, next) => {
         const response = await axios.get(url);
 
         const vets = await Promise.all(response.data.results.map(async (place) => {
+            const distanceObj = targetLat && targetLng ? calculateDistance(targetLat, targetLng, place.geometry.location.lat, place.geometry.location.lng) : { text: 'Search Result', value: 9999 };
             const details = await fetchPlaceDetails(place.place_id);
 
             return {
@@ -118,7 +127,8 @@ exports.searchVets = async (req, res, next) => {
                 name: place.name,
                 description: 'Veterinary Care Facility',
                 address: place.formatted_address,
-                distance: targetLat && targetLng ? calculateDistance(targetLat, targetLng, place.geometry.location.lat, place.geometry.location.lng) : 'Search Result',
+                distance: distanceObj.text,
+                distanceSortValue: distanceObj.value,
                 rating: place.rating || 0,
                 phone: details.phone,
                 openNow: place.opening_hours ? place.opening_hours.open_now : false,
@@ -127,9 +137,12 @@ exports.searchVets = async (req, res, next) => {
             };
         }));
 
+        // Sort vets by distance (nearest first)
+        const sortedVets = vets.sort((a, b) => a.distanceSortValue - b.distanceSortValue);
+
         res.status(200).json({
             success: true,
-            data: { vets }
+            data: { vets: sortedVets }
         });
     } catch (error) {
         console.error('Search Vets Error:', error.message);
