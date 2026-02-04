@@ -15,6 +15,11 @@ const {
  * Handles pet profile CRUD operations
  */
 
+// @route   GET /api/pets/breeds/:type
+// @desc    Get breeds for a pet type using AI (Grok)
+// @access  Private
+router.get('/breeds/:type', protect, petController.getBreedsByType);
+
 // @route   GET /api/pets
 // @desc    Get all pets for authenticated user
 // @access  Private

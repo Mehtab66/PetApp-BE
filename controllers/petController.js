@@ -1,11 +1,76 @@
 const Pet = require('../models/Pet');
 const path = require('path');
 const fs = require('fs').promises;
+const axios = require('axios');
 
 /**
  * Pet Controller
  * Handles pet profile CRUD operations
  */
+
+/**
+ * @desc    Get breeds for a pet type using AI (Grok)
+ * @route   GET /api/pets/breeds/:type
+ * @access  Private
+ */
+exports.getBreedsByType = async (req, res, next) => {
+    try {
+        const { type } = req.params;
+
+        if (!type) {
+            return res.status(400).json({
+                success: false,
+                message: 'Pet type is required',
+            });
+        }
+
+        const response = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+                model: 'llama-3.1-8b-instant',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are a pet breed expert. Return ONLY a comma-separated list of popular and existing breeds for the given pet type. No introductory text, no numbered lists, just the names separated by commas. If there are many, return the top 50.'
+                    },
+                    {
+                        role: 'user',
+                        content: `List all breeds around the world for the pet type: ${type}.`
+                    }
+                ],
+                temperature: 0
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        const breedsContent = response.data.choices[0].message.content;
+        const breeds = breedsContent.split(',')
+            .map(breed => breed.trim())
+            .filter(breed => breed.length > 0);
+
+        res.status(200).json({
+            success: true,
+            data: { breeds },
+        });
+    } catch (error) {
+        if (error.response) {
+            console.error('Groq API Error Response:', JSON.stringify(error.response.data, null, 2));
+        } else {
+            console.error('Groq API Error:', error.message);
+        }
+
+        res.status(error.response?.status || 500).json({
+            success: false,
+            message: 'Failed to fetch breeds from AI',
+            error: error.message
+        });
+    }
+};
 
 /**
  * @desc    Get all pets for authenticated user
