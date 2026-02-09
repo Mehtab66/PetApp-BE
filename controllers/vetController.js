@@ -53,12 +53,16 @@ const API_KEY = process.env.GOOGLE_PLACES_API_KEY || 'AIzaSyCnHcVmVDRCcuVQapoiVD
  */
 exports.getNearbyVets = async (req, res, next) => {
     try {
-        const { lat, lng, radius = 48280 } = req.query; // Default to 30 miles (48280 meters)
+        const { lat, lng, radius = 48280, type = 'veterinary_care', keyword } = req.query; // Default to 30 miles
 
         let targetLat = lat ? parseFloat(lat) : 40.7128; // Default NY
         let targetLng = lng ? parseFloat(lng) : -74.0060;
 
-        const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${targetLat},${targetLng}&radius=${radius}&type=veterinary_care&key=${API_KEY}`;
+        let url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${targetLat},${targetLng}&radius=${radius}&type=${type}&key=${API_KEY}`;
+        if (keyword) {
+            url += `&keyword=${encodeURIComponent(keyword)}`;
+        }
+
         const response = await axios.get(url);
 
         const vets = await Promise.all(response.data.results.map(async (place) => {
@@ -68,14 +72,14 @@ exports.getNearbyVets = async (req, res, next) => {
             return {
                 id: place.place_id,
                 name: place.name,
-                description: place.types.includes('pet_store') ? 'Pet Store & Clinic' : 'Veterinary Hospital',
+                description: place.types.includes('pet_store') ? 'Pet Store & Clinic' : (keyword || 'Veterinary Hospital'),
                 address: place.vicinity,
                 distance: distanceObj.text,
                 distanceSortValue: distanceObj.value,
                 rating: place.rating || 0,
                 phone: details.phone,
                 openNow: place.opening_hours ? place.opening_hours.open_now : false,
-                timings: details.fullHours.join('\n'), // Pass full weekly hours as newline separated string
+                timings: details.fullHours.join('\n'),
                 image: '🏥'
             };
         }));
@@ -100,7 +104,7 @@ exports.getNearbyVets = async (req, res, next) => {
  */
 exports.searchVets = async (req, res, next) => {
     try {
-        const { q, lat, lng } = req.query;
+        const { q, lat, lng, type = 'veterinary_care' } = req.query;
 
         if (!q) {
             return res.status(400).json({
@@ -112,7 +116,11 @@ exports.searchVets = async (req, res, next) => {
         let targetLat = lat ? parseFloat(lat) : null;
         let targetLng = lng ? parseFloat(lng) : null;
 
-        let url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(q + ' veterinary')}&type=veterinary_care&key=${API_KEY}`;
+        // If specific type is provided other than vet, don't append 'veterinary' to query
+        const queryTerm = type === 'veterinary_care' && !q.toLowerCase().includes('vet') ? q + ' veterinary' : q;
+
+        let url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(queryTerm)}&type=${type}&key=${API_KEY}`;
+
         if (targetLat && targetLng) {
             url += `&location=${targetLat},${targetLng}&radius=48280`;
         }
@@ -125,7 +133,7 @@ exports.searchVets = async (req, res, next) => {
             return {
                 id: place.place_id,
                 name: place.name,
-                description: 'Veterinary Care Facility',
+                description: 'Service Provider',
                 address: place.formatted_address,
                 distance: distanceObj.text,
                 distanceSortValue: distanceObj.value,
