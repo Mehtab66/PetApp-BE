@@ -20,7 +20,20 @@ const storage = new CloudinaryStorage({
     },
 });
 
+const recordStorage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'petvitals/records',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'pdf'],
+        public_id: (req, file) => {
+            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+            return `record-${req.user.id}-${uniqueSuffix}`;
+        }
+    },
+});
+
 const upload = multer({ storage: storage });
+const recordUpload = multer({ storage: recordStorage });
 
 const handleUploadError = (err, req, res, next) => {
     if (err) {
@@ -34,5 +47,6 @@ const handleUploadError = (err, req, res, next) => {
 
 module.exports = {
     uploadSingle: upload.single('photo'),
+    uploadRecords: recordUpload.array('attachments', 5),
     handleUploadError,
 };

@@ -8,6 +8,7 @@ const {
     petIdParamValidator,
     recordIdParamValidator,
 } = require('../validators/healthValidator');
+const { uploadRecords, handleUploadError } = require('../middleware/upload');
 
 /**
  * Health Record Routes
@@ -34,6 +35,8 @@ router.post(
     petIdParamValidator,
     createHealthRecordValidator,
     validate,
+    uploadRecords,
+    handleUploadError,
     healthController.createHealthRecord
 );
 
@@ -57,6 +60,8 @@ router.put(
     recordIdParamValidator,
     createHealthRecordValidator,
     validate,
+    uploadRecords,
+    handleUploadError,
     healthController.updateHealthRecord
 );
 

@@ -98,9 +98,12 @@ exports.createHealthRecord = async (req, res, next) => {
             });
         }
 
+        const attachments = req.files ? req.files.map(file => file.path) : [];
+
         const recordData = {
             ...req.body,
             petId: req.params.petId,
+            attachments,
         };
 
         const record = await HealthRecord.create(recordData);
@@ -144,9 +147,20 @@ exports.updateHealthRecord = async (req, res, next) => {
             });
         }
 
+
+        const existingAttachments = req.body.attachments
+            ? (Array.isArray(req.body.attachments) ? req.body.attachments : [req.body.attachments])
+            : record.attachments;
+
+        const newAttachments = req.files ? req.files.map(file => file.path) : [];
+        const finalAttachments = [...existingAttachments, ...newAttachments];
+
         record = await HealthRecord.findByIdAndUpdate(
             req.params.id,
-            req.body,
+            {
+                ...req.body,
+                attachments: finalAttachments,
+            },
             {
                 new: true,
                 runValidators: true,
