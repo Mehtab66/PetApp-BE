@@ -60,6 +60,9 @@ const reminderSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
+    calendarEventId: {
+        type: String,
+    },
     notes: {
         type: String,
         maxlength: [500, 'Notes cannot be more than 500 characters'],
