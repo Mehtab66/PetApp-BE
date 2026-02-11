@@ -11,13 +11,13 @@ const createPetValidator = [
         .notEmpty()
         .withMessage('Pet name is required')
         .isLength({ min: 1, max: 50 })
-        .withMessage('Pet name must be between 1 and 50 characters'),
+        .withMessage('Pet name should be between 1 and 50 characters'),
 
     body('type')
         .notEmpty()
         .withMessage('Pet type is required')
         .isIn(['Dog', 'Cat', 'Bird', 'Fish', 'Rabbit', 'Hamster', 'Other'])
-        .withMessage('Invalid pet type'),
+        .withMessage('Please select a valid pet type'),
 
     body('breed')
         .optional()
@@ -28,7 +28,7 @@ const createPetValidator = [
     body('dateOfBirth')
         .optional()
         .isISO8601()
-        .withMessage('Invalid date format'),
+        .withMessage('Please provide a valid date of birth'),
 
     body('age')
         .optional()
@@ -38,7 +38,7 @@ const createPetValidator = [
     body('gender')
         .optional()
         .isIn(['Male', 'Female', 'Unknown'])
-        .withMessage('Invalid gender'),
+        .withMessage('Please select a valid gender (Male, Female, or Unknown)'),
 
     body('weight')
         .optional()

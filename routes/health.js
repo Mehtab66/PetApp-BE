@@ -33,10 +33,10 @@ router.post(
     '/:petId',
     protect,
     petIdParamValidator,
-    createHealthRecordValidator,
-    validate,
     uploadRecords,
     handleUploadError,
+    createHealthRecordValidator,
+    validate,
     healthController.createHealthRecord
 );
 
@@ -58,10 +58,10 @@ router.put(
     '/record/:id',
     protect,
     recordIdParamValidator,
-    createHealthRecordValidator,
-    validate,
     uploadRecords,
     handleUploadError,
+    createHealthRecordValidator,
+    validate,
     healthController.updateHealthRecord
 );
 

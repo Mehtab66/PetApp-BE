@@ -10,14 +10,14 @@ const createHealthRecordValidator = [
         .notEmpty()
         .withMessage('Record type is required')
         .isIn(['vaccination', 'medication', 'vet_visit', 'other'])
-        .withMessage('Invalid record type'),
+        .withMessage('Record type must be Vaccination, Medication, Vet Visit, or Other'),
 
     body('title')
         .trim()
         .notEmpty()
         .withMessage('Title is required')
         .isLength({ min: 1, max: 100 })
-        .withMessage('Title must be between 1 and 100 characters'),
+        .withMessage('Title should be between 1 and 100 characters'),
 
     body('description')
         .optional()
@@ -28,7 +28,7 @@ const createHealthRecordValidator = [
     body('date')
         .optional()
         .isISO8601()
-        .withMessage('Invalid date format'),
+        .withMessage('Please provide a valid date'),
 
     body('vaccineName')
         .optional()
@@ -37,7 +37,7 @@ const createHealthRecordValidator = [
     body('nextDueDate')
         .optional()
         .isISO8601()
-        .withMessage('Invalid next due date format'),
+        .withMessage('Please provide a valid next due date'),
 
     body('medicationName')
         .optional()
