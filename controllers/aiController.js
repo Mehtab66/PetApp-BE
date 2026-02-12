@@ -1,8 +1,10 @@
 const axios = require('axios');
+const Pet = require('../models/Pet');
+const HealthRecord = require('../models/HealthRecord');
 
 /**
  * AI Controller
- * Handles pet health related AI queries
+ * Handles both generic and personalized AI queries
  */
 
 /**
@@ -12,7 +14,7 @@ const axios = require('axios');
  */
 exports.getChatResponse = async (req, res, next) => {
     try {
-        const { message, petId, history } = req.body;
+        const { message, petId, history, isDoctorMode } = req.body;
 
         if (!message) {
             return res.status(400).json({
@@ -21,26 +23,57 @@ exports.getChatResponse = async (req, res, next) => {
             });
         }
 
-        // System prompt to guide the AI
-        const systemPrompt = `You are an expert Pet Health AI Assistant. 
-Your goal is to provide accurate, helpful, and empathetic advice regarding pet health, nutrition, behavior, and general care.
-Always prioritize the pet's well-being.
-If a situation sounds urgent or life-threatening, strongly recommend immediate veterinary consultation.
+        let systemPrompt = '';
 
-CLEAN FORMATTING RULES:
-- DO NOT use asterisks (**) for bolding or lists.
-- DO NOT use markdown symbols that make the text look cluttered.
-- Use clear, simple paragraphs.
-- Use plain bullet points (•) or dashes (-) for lists if needed.
-- Keep the tone friendly and professional.
-- If information about a specific pet is provided, tailor your advice to that pet's species, breed, and age.`;
+        if (isDoctorMode) {
+            // High-context Doctor Mode
+            let petContext = 'You are AI Dr. Pet, a specialized veterinary AI who has access to the user\'s specific pet data.';
 
+            if (petId) {
+                const pet = await Pet.findOne({ _id: petId, userId: req.user.id });
+                if (pet) {
+                    petContext += `\n\nPATIENT PROFILE:
+- Name: ${pet.name}
+- Species: ${pet.type}
+- Breed: ${pet.breed || 'Unknown'}
+- Age: ${pet.calculatedAge || pet.age || 'Unknown'} years
+- Weight: ${pet.weight || 'Unknown'} ${pet.weightUnit}
+- Health Notes: ${pet.notes || 'None'}`;
+
+                    const healthRecords = await HealthRecord.find({ petId }).sort({ date: -1 }).limit(5);
+                    if (healthRecords.length > 0) {
+                        petContext += `\n\nRECENT MEDICAL HISTORY:`;
+                        healthRecords.forEach(record => {
+                            petContext += `\n- ${new Date(record.date).toLocaleDateString()}: ${record.title} (${record.type})`;
+                            if (record.diagnosis) petContext += ` | Dx: ${record.diagnosis}`;
+                            if (record.treatment) petContext += ` | Tx: ${record.treatment}`;
+                        });
+                    }
+                }
+            } else {
+                const pets = await Pet.find({ userId: req.user.id, isActive: true });
+                if (pets.length > 0) {
+                    petContext += `\n\nUSER'S PETS: ${pets.map(p => `${p.name} (${p.type})`).join(', ')}`;
+                    petContext += `\n\nAsk the user which pet they are inquiring about to provide specific medical advice.`;
+                }
+            }
+
+            systemPrompt = `${petContext}
+
+GOAL: Provide clinical-grade (but safe) veterinary advice. Analyze records if provided.
+CLEAN FORMATTING: No asterisks, use bullet points (•), be professional and precise.`;
+
+        } else {
+            // Generic AI Mode
+            systemPrompt = `You are a helpful Pet Care Assistant. Use a friendly tone. 
+Provide general advice about pets. If a situation sounds urgent, suggest a vet.
+CLEAN FORMATTING: No asterisks, use bullet points (•), use clear paragraphs.`;
+        }
 
         const messages = [
             { role: 'system', content: systemPrompt }
         ];
 
-        // Add history if available
         if (history && Array.isArray(history)) {
             history.forEach(msg => {
                 messages.push({
@@ -50,13 +83,12 @@ CLEAN FORMATTING RULES:
             });
         }
 
-        // Add current message
         messages.push({ role: 'user', content: message });
 
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile', // Updated to latest recommended model
+                model: 'llama-3.3-70b-versatile',
                 messages: messages,
                 temperature: 0.7,
                 max_tokens: 1024,
@@ -70,17 +102,12 @@ CLEAN FORMATTING RULES:
         );
 
         let aiMessage = response.data.choices[0].message.content;
-
-        // Clean up any remaining asterisks or excessive markdown symbols for a cleaner UI
         aiMessage = aiMessage.replace(/\*\*/g, '').replace(/\*/g, '');
 
         res.status(200).json({
             success: true,
-            data: {
-                message: aiMessage.trim()
-            },
+            data: { message: aiMessage.trim() },
         });
-
     } catch (error) {
         console.error('AI Chat Error:', error.response?.data || error.message);
         res.status(error.response?.status || 500).json({
