@@ -15,6 +15,8 @@ const reminderRoutes = require('./routes/reminders');
 const vetRoutes = require('./routes/vets');
 const expenseRoutes = require('./routes/expenses');
 const aiRoutes = require('./routes/ai');
+const publicRoutes = require('./routes/public');
+
 
 // Initialize express app
 const app = express();
@@ -42,6 +44,8 @@ app.use('/api/reminders', reminderRoutes);
 app.use('/api/vets', vetRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/public', publicRoutes);
+
 
 // Health check route
 app.get('/api/health-check', (req, res) => {

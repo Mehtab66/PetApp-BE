@@ -63,6 +63,25 @@ const petSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: 0
+    },
+    isLost: {
+        type: Boolean,
+        default: false,
+    },
+    tagId: {
+        type: String,
+        unique: true,
+        sparse: true,
+    },
+    lostLocation: {
+        lat: Number,
+        lng: Number,
+        address: String,
+        timestamp: Date,
+    },
+    publicMedicalInfo: {
+        type: String,
+        maxlength: [1000, 'Medical info cannot be more than 1000 characters'],
     }
 }, {
     timestamps: true,
