@@ -286,7 +286,19 @@ exports.toggleLostStatus = async (req, res, next) => {
                 ...lostLocation,
                 timestamp: new Date()
             };
+
+            // Set GeoJSON location for radius searches
+            if (lostLocation && lostLocation.lat && lostLocation.lng) {
+                pet.location = {
+                    type: 'Point',
+                    coordinates: [parseFloat(lostLocation.lng), parseFloat(lostLocation.lat)]
+                };
+            }
+
             pet.publicMedicalInfo = publicMedicalInfo || pet.publicMedicalInfo;
+        } else {
+            // Reset location if found
+            pet.location = undefined;
         }
 
         await pet.save();
@@ -343,7 +355,23 @@ exports.assignTagId = async (req, res, next) => {
  */
 exports.getLostPets = async (req, res, next) => {
     try {
-        const lostPets = await Pet.find({ isLost: true, isActive: true })
+        const { lat, lng } = req.query;
+        let query = { isLost: true, isActive: true };
+
+        // If coordinates provided, filter by radius (30 miles ~= 48280 meters)
+        if (lat && lng) {
+            query.location = {
+                $nearSphere: {
+                    $geometry: {
+                        type: 'Point',
+                        coordinates: [parseFloat(lng), parseFloat(lat)]
+                    },
+                    $maxDistance: 48280 // 30 miles in meters
+                }
+            };
+        }
+
+        const lostPets = await Pet.find(query)
             .select('name type breed photo lostLocation createdAt')
             .sort({ 'lostLocation.timestamp': -1 });
 

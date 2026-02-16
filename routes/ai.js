@@ -4,7 +4,6 @@ const {
     getChatResponse,
     getHealthRoadmap,
     symptomCheck,
-    photoAnalysis,
     behaviorTraining,
     expenseOptimizer
 } = require('../controllers/aiController');
@@ -19,7 +18,6 @@ router.post('/roadmap/:petId', getHealthRoadmap);
 
 // New AI Features
 router.post('/symptom-check', symptomCheck);
-router.post('/photo-analysis', photoAnalysis);
 router.post('/behavior-training', behaviorTraining);
 router.post('/expense-optimizer', expenseOptimizer);
 

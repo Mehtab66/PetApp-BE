@@ -79,6 +79,17 @@ const petSchema = new mongoose.Schema({
         address: String,
         timestamp: Date,
     },
+    location: {
+        type: {
+            type: String,
+            enum: ['Point'],
+            default: 'Point'
+        },
+        coordinates: {
+            type: [Number],
+            index: '2dsphere'
+        }
+    },
     publicMedicalInfo: {
         type: String,
         maxlength: [1000, 'Medical info cannot be more than 1000 characters'],
@@ -89,6 +100,7 @@ const petSchema = new mongoose.Schema({
 
 // Index for faster queries
 petSchema.index({ userId: 1, createdAt: -1 });
+petSchema.index({ location: '2dsphere' });
 
 // Virtual for calculating age from date of birth
 petSchema.virtual('calculatedAge').get(function () {

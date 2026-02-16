@@ -309,64 +309,6 @@ FORMATTING: No asterisks, use bullet points (•), be clear and calming.`;
     }
 };
 
-/**
- * @desc    AI Photo Analysis - Analyze pet photo for health issues
- * @route   POST /api/ai/photo-analysis
- * @access  Private
- */
-exports.photoAnalysis = async (req, res, next) => {
-    try {
-        const { petId, photoUrl, concernArea } = req.body;
-
-        const pet = await Pet.findOne({ _id: petId, userId: req.user.id });
-        if (!pet) {
-            return res.status(404).json({ success: false, message: 'Pet not found' });
-        }
-
-        // Note: For full vision analysis, you'd use OpenAI Vision or Google Gemini Vision
-        // For now, we'll provide a text-based analysis prompt
-        const prompt = `You are a Veterinary Visual Diagnostician.
-
-The owner has ${photoUrl ? 'uploaded a photo' : 'provided details'} of their ${pet.type} (${pet.breed}) focusing on: ${concernArea || 'general health check'}.
-
-Based on common visual indicators for ${pet.type}s, provide:
-
-1. WHAT TO LOOK FOR: Key visual signs of health issues in ${concernArea || 'this area'}
-2. NORMAL VS ABNORMAL: Describe what's normal vs concerning
-3. COMMON ISSUES: List 3 common problems visible in photos for this breed
-4. NEXT STEPS: Should they monitor, take more photos, or see a vet?
-
-Note: Remind them that photo analysis has limitations and in-person vet exams are most accurate.
-
-FORMATTING: No asterisks, use bullet points (•).`;
-
-        const response = await axios.post(
-            'https://api.groq.com/openai/v1/chat/completions',
-            {
-                model: 'llama-3.3-70b-versatile',
-                messages: [{ role: 'system', content: prompt }],
-                temperature: 0.6,
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
-                    'Content-Type': 'application/json'
-                }
-            }
-        );
-
-        let analysis = response.data.choices[0].message.content;
-        analysis = analysis.replace(/\*\*/g, '').replace(/\*/g, '');
-
-        res.status(200).json({
-            success: true,
-            data: { analysis }
-        });
-    } catch (error) {
-        console.error('Photo Analysis Error:', error.message);
-        res.status(500).json({ success: false, message: 'Failed to analyze photo' });
-    }
-};
 
 /**
  * @desc    AI Behavior Decoder & Training Plan

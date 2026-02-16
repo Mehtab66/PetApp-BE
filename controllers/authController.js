@@ -12,7 +12,7 @@ const User = require('../models/User');
  */
 exports.register = async (req, res, next) => {
     try {
-        const { name, email, password } = req.body;
+        const { name, email, password, phone } = req.body;
 
         // Check if user already exists
         const existingUser = await User.findOne({ email });
@@ -28,6 +28,7 @@ exports.register = async (req, res, next) => {
             name,
             email,
             password,
+            phone,
         });
 
         // Generate token
@@ -41,6 +42,7 @@ exports.register = async (req, res, next) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
+                    phone: user.phone,
                     createdAt: user.createdAt,
                 },
                 token,
@@ -89,6 +91,7 @@ exports.login = async (req, res, next) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
+                    phone: user.phone,
                     createdAt: user.createdAt,
                 },
                 token,
@@ -115,6 +118,7 @@ exports.getProfile = async (req, res, next) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
+                    phone: user.phone,
                     createdAt: user.createdAt,
                 },
             },
@@ -131,11 +135,12 @@ exports.getProfile = async (req, res, next) => {
  */
 exports.updateProfile = async (req, res, next) => {
     try {
-        const { name, email } = req.body;
+        const { name, email, phone } = req.body;
 
         const fieldsToUpdate = {};
         if (name) fieldsToUpdate.name = name;
         if (email) fieldsToUpdate.email = email;
+        if (phone) fieldsToUpdate.phone = phone;
 
         const user = await User.findByIdAndUpdate(
             req.user.id,
@@ -154,6 +159,7 @@ exports.updateProfile = async (req, res, next) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
+                    phone: user.phone,
                     createdAt: user.createdAt,
                 },
             },
