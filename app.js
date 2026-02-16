@@ -36,6 +36,10 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files (uploaded images)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Public Routes (Mounted at root for QR codes)
+app.use('/', publicRoutes);
+app.get('/test-scan', (req, res) => res.send('Scan route reached!'));
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/pets', petRoutes);
