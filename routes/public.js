@@ -11,6 +11,7 @@ const publicController = require('../controllers/publicController');
 // @desc    Get pet profile by tag ID (HTML View)
 // @access  Public
 router.get('/scan/:tagId', publicController.renderScanPage);
+router.get('/vault/:shareToken', publicController.renderVaultPage);
 
 // @route   GET /api/public/pet/:tagId
 // @desc    Get pet profile by tag ID

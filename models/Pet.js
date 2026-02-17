@@ -93,6 +93,15 @@ const petSchema = new mongoose.Schema({
     publicMedicalInfo: {
         type: String,
         maxlength: [1000, 'Medical info cannot be more than 1000 characters'],
+    },
+    medicalVaultActive: {
+        type: Boolean,
+        default: false,
+    },
+    vaultShareToken: {
+        type: String,
+        unique: true,
+        sparse: true,
     }
 }, {
     timestamps: true,
