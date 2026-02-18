@@ -32,8 +32,21 @@ const recordStorage = new CloudinaryStorage({
     },
 });
 
+const marketplaceStorage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'petvitals/marketplace',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
+        public_id: (req, file) => {
+            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+            return `item-${req.user.id}-${uniqueSuffix}`;
+        }
+    },
+});
+
 const upload = multer({ storage: storage });
 const recordUpload = multer({ storage: recordStorage });
+const marketplaceUpload = multer({ storage: marketplaceStorage });
 
 const handleUploadError = (err, req, res, next) => {
     if (err) {
@@ -48,5 +61,6 @@ const handleUploadError = (err, req, res, next) => {
 module.exports = {
     uploadSingle: upload.single('photo'),
     uploadRecords: recordUpload.array('attachments', 5),
+    uploadMarketplace: marketplaceUpload.array('images', 5),
     handleUploadError,
 };

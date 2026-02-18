@@ -82,16 +82,6 @@ router.post(
     petController.uploadPhoto
 );
 
-// @route   PUT /api/pets/:id/lost-status
-// @desc    Toggle lost status for a pet
-// @access  Private
-router.put(
-    '/:id/lost-status',
-    protect,
-    petIdValidator,
-    validate,
-    petController.toggleLostStatus
-);
 
 // @route   PUT /api/pets/:id/tag
 // @desc    Assign or generate tag ID for a pet
@@ -99,15 +89,8 @@ router.put(
 router.put(
     '/:id/tag',
     protect,
-    petIdValidator,
-    validate,
     petController.assignTagId
 );
-
-// @route   GET /api/pets/lost/all
-// @desc    Get all lost pets
-// @access  Private
-router.get('/lost/all', protect, petController.getLostPets);
 
 module.exports = router;
 

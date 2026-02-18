@@ -17,6 +17,7 @@ const expenseRoutes = require('./routes/expenses');
 const aiRoutes = require('./routes/ai');
 const vaultRoutes = require('./routes/vault');
 const publicRoutes = require('./routes/public');
+const marketplaceRoutes = require('./routes/marketplace');
 
 
 // Initialize express app
@@ -51,6 +52,7 @@ app.use('/api/expenses', expenseRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/marketplace', marketplaceRoutes);
 
 
 // Health check route

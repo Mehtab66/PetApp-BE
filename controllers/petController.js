@@ -257,67 +257,13 @@ exports.uploadPhoto = async (req, res, next) => {
     }
 };
 
-const crypto = require('crypto');
-
-/**
- * @desc    Toggle lost status for a pet
- * @route   PUT /api/pets/:id/lost-status
- * @access  Private
- */
-exports.toggleLostStatus = async (req, res, next) => {
-    try {
-        const { isLost, lostLocation, publicMedicalInfo } = req.body;
-
-        let pet = await Pet.findOne({
-            _id: req.params.id,
-            userId: req.user.id,
-        });
-
-        if (!pet) {
-            return res.status(404).json({
-                success: false,
-                message: 'Pet not found',
-            });
-        }
-
-        pet.isLost = isLost;
-        if (isLost) {
-            pet.lostLocation = {
-                ...lostLocation,
-                timestamp: new Date()
-            };
-
-            // Set GeoJSON location for radius searches
-            if (lostLocation && lostLocation.lat && lostLocation.lng) {
-                pet.location = {
-                    type: 'Point',
-                    coordinates: [parseFloat(lostLocation.lng), parseFloat(lostLocation.lat)]
-                };
-            }
-
-            pet.publicMedicalInfo = publicMedicalInfo || pet.publicMedicalInfo;
-        } else {
-            // Reset location if found
-            pet.location = undefined;
-        }
-
-        await pet.save();
-
-        res.status(200).json({
-            success: true,
-            message: `Pet marked as ${isLost ? 'lost' : 'found'}`,
-            data: { pet },
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
 /**
  * @desc    Assign or generate tag ID for a pet
  * @route   PUT /api/pets/:id/tag
  * @access  Private
  */
+const crypto = require('crypto');
+
 exports.assignTagId = async (req, res, next) => {
     try {
         let pet = await Pet.findOne({
@@ -342,43 +288,6 @@ exports.assignTagId = async (req, res, next) => {
             success: true,
             message: 'Tag ID assigned successfully',
             data: { tagId: pet.tagId },
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-/**
- * @desc    Get all lost pets (for nearby broadcast)
- * @route   GET /api/pets/lost/all
- * @access  Private
- */
-exports.getLostPets = async (req, res, next) => {
-    try {
-        const { lat, lng } = req.query;
-        let query = { isLost: true, isActive: true };
-
-        // If coordinates provided, filter by radius (30 miles ~= 48280 meters)
-        if (lat && lng) {
-            query.location = {
-                $nearSphere: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: [parseFloat(lng), parseFloat(lat)]
-                    },
-                    $maxDistance: 48280 // 30 miles in meters
-                }
-            };
-        }
-
-        const lostPets = await Pet.find(query)
-            .select('name type breed photo lostLocation createdAt')
-            .sort({ 'lostLocation.timestamp': -1 });
-
-        res.status(200).json({
-            success: true,
-            count: lostPets.length,
-            data: { lostPets },
         });
     } catch (error) {
         next(error);
