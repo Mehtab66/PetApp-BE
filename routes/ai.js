@@ -5,7 +5,10 @@ const {
     getHealthRoadmap,
     symptomCheck,
     behaviorTraining,
-    expenseOptimizer
+    expenseOptimizer,
+    nutritionAdvice,
+    firstAidGuidance,
+    breedCareTips
 } = require('../controllers/aiController');
 const { protect } = require('../middleware/auth');
 
@@ -20,5 +23,8 @@ router.post('/roadmap/:petId', getHealthRoadmap);
 router.post('/symptom-check', symptomCheck);
 router.post('/behavior-training', behaviorTraining);
 router.post('/expense-optimizer', expenseOptimizer);
+router.post('/nutrition-advice', nutritionAdvice);
+router.post('/first-aid', firstAidGuidance);
+router.post('/breed-care', breedCareTips);
 
 module.exports = router;

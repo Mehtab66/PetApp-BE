@@ -338,13 +338,14 @@ PET PROFILE:
 BEHAVIOR ISSUE:
 ${behaviorIssue}
 
-PROVIDE A COMPREHENSIVE TRAINING PLAN:
+PROVIDE A COMPREHENSIVE BEHAVIORAL ANALYSIS & TRAINING PLAN:
 
-1. ROOT CAUSE ANALYSIS: Why is this happening? (breed tendencies, age factors)
-2. 7-DAY TRAINING PLAN: Day-by-day exercises with specific instructions
-3. DO's and DON'Ts: Critical mistakes to avoid
-4. PROGRESS MARKERS: How to know if it's working
-5. WHEN TO GET HELP: Signs you need a professional trainer
+1. BEHAVIORAL ANALYSIS: Identify what are "unusual patterns" or triggers in this behavior based on breed tendencies and age.
+2. ROOT CAUSE ANALYSIS: Why is this happening? (anxiety, boredom, instinctual drive, or medical discomfort).
+3. 7-DAY TRAINING PLAN: Day-by-day exercises with specific instructions.
+4. DO's and DON'Ts: Critical mistakes to avoid.
+5. PROGRESS MARKERS: How to know if it's working.
+6. WHEN TO GET HELP: Signs you need a professional trainer or if it's a medical issue.
 
 FORMATTING: No asterisks, use bullet points (•), be encouraging and specific.`;
 
@@ -442,5 +443,191 @@ FORMATTING: No asterisks, use bullet points (•), be practical and money-consci
     } catch (error) {
         console.error('Expense Optimizer Error:', error.message);
         res.status(500).json({ success: false, message: 'Failed to optimize expenses' });
+    }
+};
+
+/**
+ * @desc    AI Nutrition Advisor - Recommend food based on health data
+ * @route   POST /api/ai/nutrition-advice
+ * @access  Private
+ */
+exports.nutritionAdvice = async (req, res, next) => {
+    try {
+        const { petId, healthGoals, currentDiet } = req.body;
+
+        const pet = await Pet.findOne({ _id: petId, userId: req.user.id });
+        if (!pet) {
+            return res.status(404).json({ success: false, message: 'Pet not found' });
+        }
+
+        const healthRecords = await HealthRecord.find({ petId }).sort({ date: -1 }).limit(10);
+
+        const prompt = `You are an expert Pet Nutritionist.
+Analyze the nutritional needs for this pet:
+
+PET PROFILE:
+- Species: ${pet.type}
+- Breed: ${pet.breed || 'Unknown'}
+- Age: ${pet.calculatedAge || pet.age || 'Unknown'} years
+- Weight: ${pet.weight} ${pet.weightUnit}
+- Recent Medical History: ${healthRecords.map(r => r.title).join(', ')}
+
+CURRENT DIET: ${currentDiet || 'Not specified'}
+HEALTH GOALS: ${healthGoals || 'General health maintenance'}
+
+PROVIDE:
+1. NUTRITIONAL ASSESSMENT: Key requirements for this breed/age.
+2. RECOMMENDED FOOD TYPES: Specific ingredients or commercial diet types (e.g., high-protein, low-carb, grain-free).
+3. FEEDING SCHEDULE: Optimal frequency and portion sizes.
+4. FOODS TO AVOID: Specific triggers or harmful foods for this breed.
+5. SUPPLEMENT RECOMMENDATIONS: If any are needed based on history.
+
+FORMATTING: No asterisks, use bullet points (•), be precise and professional.`;
+
+        const response = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+                model: 'llama-3.3-70b-versatile',
+                messages: [{ role: 'system', content: prompt }],
+                temperature: 0.7,
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        let advice = response.data.choices[0].message.content;
+        advice = advice.replace(/\*\*/g, '').replace(/\*/g, '');
+
+        res.status(200).json({
+            success: true,
+            data: { advice }
+        });
+    } catch (error) {
+        console.error('Nutrition Advice Error:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to generate nutrition advice' });
+    }
+};
+
+/**
+ * @desc    AI First Aid & Safety - Guidance for emergencies and poisonous items
+ * @route   POST /api/ai/first-aid
+ * @access  Private
+ */
+exports.firstAidGuidance = async (req, res, next) => {
+    try {
+        const { petId, emergencyType, itemInvolved } = req.body;
+
+        const pet = await Pet.findOne({ _id: petId, userId: req.user.id });
+
+        let context = pet ? `for a ${pet.type} (${pet.breed || 'Unknown'})` : 'for a pet';
+
+        const prompt = `You are an Emergency Veterinary Technician.
+Provide immediate first aid guidance ${context}.
+
+EMERGENCY TYPE: ${emergencyType}
+ITEM INVOLVED (if any): ${itemInvolved}
+
+IF THIS IS A POISONING/TOXICITY CASE:
+- Identify if the item is dangerous.
+- Provide immediate steps to take.
+- List common symptoms of this poisoning.
+
+FOR GENERAL EMERGENCIES:
+- Step-by-step stabilization instructions.
+- What NOT to do (critical mistakes).
+- Signs that require immediate ER visit.
+
+DISCLAIMER: Always emphasize that this is for stability and they must contact a vet immediately.
+
+FORMATTING: Use bold headers (without asterisks), use bullet points (•), be urgent yet calm and clear.`;
+
+        const response = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+                model: 'llama-3.3-70b-versatile',
+                messages: [{ role: 'system', content: prompt }],
+                temperature: 0.5, // Lower temperature for more factual/safe responses
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        let guidance = response.data.choices[0].message.content;
+        guidance = guidance.replace(/\*\*/g, '').replace(/\*/g, '');
+
+        res.status(200).json({
+            success: true,
+            data: { guidance }
+        });
+    } catch (error) {
+        console.error('First Aid Error:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to generate first aid guidance' });
+    }
+};
+
+/**
+ * @desc    AI Breed Care Guide - Specific information and care tips
+ * @route   POST /api/ai/breed-care
+ * @access  Private
+ */
+exports.breedCareTips = async (req, res, next) => {
+    try {
+        const { petId } = req.body;
+
+        const pet = await Pet.findOne({ _id: petId, userId: req.user.id });
+        if (!pet) {
+            return res.status(404).json({ success: false, message: 'Pet not found' });
+        }
+
+        const prompt = `You are an expert on Pet Breeds and Care.
+Provide comprehensive care tips and characteristics for this breed:
+
+SPECIES: ${pet.type}
+BREED: ${pet.breed || 'Unknown'}
+AGE: ${pet.calculatedAge || pet.age || 'Unknown'} years
+
+PROVIDE:
+1. KEY CHARACTERISTICS: Personality, energy levels, temperament.
+2. GROOMING NEEDS: Coat care, bathing, nail trimming specifics.
+3. EXERCISE REQUIREMENTS: Daily activity levels and best types of play.
+4. COMMON HEALTH TRENDS: Genetic predispositions or breed-specific risks to watch for.
+5. TRAINING STYLE: Best approach for this breed's intelligence and motivation.
+6. LIFE STAGE ADVICE: Specific tips for their current age (${pet.calculatedAge || pet.age} years).
+
+FORMATTING: No asterisks, use bullet points (•), be informative and breed-specific.`;
+
+        const response = await axios.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            {
+                model: 'llama-3.3-70b-versatile',
+                messages: [{ role: 'system', content: prompt }],
+                temperature: 0.7,
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        let guide = response.data.choices[0].message.content;
+        guide = guide.replace(/\*\*/g, '').replace(/\*/g, '');
+
+        res.status(200).json({
+            success: true,
+            data: { guide }
+        });
+    } catch (error) {
+        console.error('Breed Care Error:', error.message);
+        res.status(500).json({ success: false, message: 'Failed to generate breed care tips' });
     }
 };
