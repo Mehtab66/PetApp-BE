@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const petController = require('../controllers/petController');
+const petActivitiesController = require('../controllers/petActivitiesController');
 const { protect } = require('../middleware/auth');
 const { uploadSingle, handleUploadError } = require('../middleware/upload');
 const validate = require('../middleware/validate');
@@ -90,6 +91,17 @@ router.put(
     '/:id/tag',
     protect,
     petController.assignTagId
+);
+
+// @route   GET /api/pets/:id/activities
+// @desc    Get activity ideas for a pet based on breed and age
+// @access  Private
+router.get(
+    '/:id/activities',
+    protect,
+    petIdValidator,
+    validate,
+    petActivitiesController.getPetActivities
 );
 
 module.exports = router;
