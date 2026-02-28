@@ -18,6 +18,7 @@ const aiRoutes = require('./routes/ai');
 const vaultRoutes = require('./routes/vault');
 const publicRoutes = require('./routes/public');
 const marketplaceRoutes = require('./routes/marketplace');
+const amazonRoutes = require('./routes/amazon');
 
 
 // Initialize express app
@@ -53,6 +54,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/amazon', amazonRoutes);
 
 
 // Health check route

@@ -64,31 +64,10 @@ const petSchema = new mongoose.Schema({
         default: 0,
         min: 0
     },
-    isLost: {
-        type: Boolean,
-        default: false,
-    },
     tagId: {
         type: String,
         unique: true,
         sparse: true,
-    },
-    lostLocation: {
-        lat: Number,
-        lng: Number,
-        address: String,
-        timestamp: Date,
-    },
-    location: {
-        type: {
-            type: String,
-            enum: ['Point'],
-            default: 'Point'
-        },
-        coordinates: {
-            type: [Number],
-            index: '2dsphere'
-        }
     },
     publicMedicalInfo: {
         type: String,
@@ -109,7 +88,6 @@ const petSchema = new mongoose.Schema({
 
 // Index for faster queries
 petSchema.index({ userId: 1, createdAt: -1 });
-petSchema.index({ location: '2dsphere' });
 
 // Virtual for calculating age from date of birth
 petSchema.virtual('calculatedAge').get(function () {

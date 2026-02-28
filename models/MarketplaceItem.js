@@ -76,6 +76,14 @@ const marketplaceItemSchema = new mongoose.Schema({
     views: {
         type: Number,
         default: 0,
+    },
+    affiliateLink: {
+        type: String,
+        trim: true,
+    },
+    isAffiliate: {
+        type: Boolean,
+        default: true,
     }
 }, {
     timestamps: true,
