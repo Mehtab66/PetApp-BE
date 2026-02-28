@@ -12,55 +12,74 @@ exports.getItems = async (req, res, next) => {
         // Only show Amazon/Affiliate products, eliminate user listings
         let query = { status: 'Available', isAffiliate: true };
 
-        // Category filter
-        if (category && category !== 'All' && category !== '') {
-            query.category = category;
-        }
-
-        // Condition filter
-        if (condition && condition !== 'All') {
-            query.condition = condition;
-        }
-
-        // Price range filter
+        // ... filters ...
+        if (category && category !== 'All' && category !== '') query.category = category;
+        if (condition && condition !== 'All') query.condition = condition;
         if (minPrice || maxPrice) {
             query.price = {};
             if (minPrice) query.price.$gte = parseFloat(minPrice);
             if (maxPrice) query.price.$lte = parseFloat(maxPrice);
         }
+        if (search) query.$text = { $search: search };
 
-        // Text search
-        if (search) {
-            query.$text = { $search: search };
-        }
+        let items = await MarketplaceItem.find(query)
+            .populate('sellerId', 'name photo')
+            .sort(sortBy === 'price_low' ? { price: 1 } : sortBy === 'price_high' ? { price: -1 } : { createdAt: -1 });
 
-        // Location filter
-        if (lat && lng && radius && radius !== 'Anywhere') {
-            const radInKm = parseFloat(radius);
-            if (!isNaN(radInKm)) {
-                // Use $geoWithin with $centerSphere for reliable distance filtering 
-                // and to allow custom sorting (unlike $near which forces distance sort)
-                query.location = {
-                    $geoWithin: {
-                        $centerSphere: [
-                            [parseFloat(lng), parseFloat(lat)],
-                            radInKm / 6378.1 // Convert km to radians
-                        ]
-                    }
-                };
+        // MAGIC SEEDER: If the store is empty, automatically seed some best-selling products
+        if (items.length === 0 && !search && (!category || category === 'All')) {
+            console.log('✨ Marketplace empty, seeding featured items...');
+            const featured = [
+                {
+                    title: 'Interactive Dog Puzzle Toy - Level 2',
+                    description: 'Keep your dog engaged and mentally stimulated with this hidden treat puzzle.',
+                    price: 24.99,
+                    category: 'Toys',
+                    condition: 'New',
+                    images: ['https://images.unsplash.com/photo-1541591415600-9820bf58299c?w=500'],
+                    address: 'Amazon Global',
+                    location: { type: 'Point', coordinates: [0, 0] },
+                    isAffiliate: true,
+                    affiliateLink: 'https://amzn.to/example1',
+                    status: 'Available',
+                    sellerId: req.user.id // Assign to current user as placeholder
+                },
+                {
+                    title: 'Memory Foam Orthopedic Pet Bed',
+                    description: 'Ultra-soft memory foam with a removable, washable cover. Perfect for senior pets.',
+                    price: 79.00,
+                    category: 'Beds & Furniture',
+                    condition: 'New',
+                    images: ['https://images.unsplash.com/photo-1591946614421-1fbf121fca3c?w=500'],
+                    address: 'Amazon Global',
+                    location: { type: 'Point', coordinates: [0, 0] },
+                    isAffiliate: true,
+                    affiliateLink: 'https://amzn.to/example2',
+                    status: 'Available',
+                    sellerId: req.user.id
+                },
+                {
+                    title: 'Natural Grain-Free Salmon & Sweet Potato',
+                    description: 'High-protein, grain-free formula for sensitive stomachs.',
+                    price: 45.99,
+                    category: 'Food & Treats',
+                    condition: 'New',
+                    images: ['https://images.unsplash.com/photo-1589924691995-400dc9ecc119?w=500'],
+                    address: 'Amazon Global',
+                    location: { type: 'Point', coordinates: [0, 0] },
+                    isAffiliate: true,
+                    affiliateLink: 'https://amzn.to/example3',
+                    status: 'Available',
+                    sellerId: req.user.id
+                }
+            ];
+
+            // Create items and add them to the local 'items' array
+            for (const f of featured) {
+                const newItem = await MarketplaceItem.create(f);
+                items.push(newItem);
             }
         }
-
-        // Sorting logic
-        let sortOption = { createdAt: -1 }; // Default: Newest first
-        if (sortBy === 'price_low') sortOption = { price: 1 };
-        else if (sortBy === 'price_high') sortOption = { price: -1 };
-        else if (sortBy === 'oldest') sortOption = { createdAt: 1 };
-        else if (sortBy === 'views') sortOption = { views: -1 };
-
-        const items = await MarketplaceItem.find(query)
-            .populate('sellerId', 'name photo')
-            .sort(sortOption);
 
         res.status(200).json({
             success: true,

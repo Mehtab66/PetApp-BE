@@ -27,30 +27,29 @@ const amazonService = {
             return cachedResults;
         }
 
-        // 2. Check for Request Coalescing
-        // If someone is already searching for this EXACT term, wait for their result
+        // 2. Coalescing: Check if a request for this keyword is already in flight
         if (pendingRequests.has(cacheKey)) {
             console.log('⏳ Joining existing ongoing request for:', cleanKeyword);
             return pendingRequests.get(cacheKey);
         }
 
-        // 3. Create a New Request with Coalescing
-        const searchPromise = (async () => {
+        // 3. Perform the search
+        const performSearch = async () => {
             try {
-                // Respect Global Cooldown
+                // Rate Limiting / Cooldown
                 const now = Date.now();
-                const timeSinceLastHit = now - lastApiHitTimestamp;
-                if (timeSinceLastHit < MIN_COOLDOWN_MS) {
-                    const waitTime = MIN_COOLDOWN_MS - timeSinceLastHit;
-                    console.log(`🐢 Global Cooldown: Waiting ${waitTime}ms before hitting Amazon...`);
-                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                if (now - lastApiHitTimestamp < MIN_COOLDOWN_MS) {
+                    await new Promise(r => setTimeout(r, MIN_COOLDOWN_MS - (now - lastApiHitTimestamp)));
                 }
 
-                // If keys are missing, return mock data immediately
-                if (!process.env.AMAZON_ACCESS_KEY || process.env.AMAZON_ACCESS_KEY === 'YOUR_KEY' || process.env.AMAZON_ACCESS_KEY.length < 5) {
-                    console.warn('⚠️ AMAZON_ACCESS_KEY invalid or missing, using mock data.');
+                // API Key check
+                if (!process.env.AMAZON_ACCESS_KEY || process.env.AMAZON_ACCESS_KEY.includes('YOUR_KEY')) {
+                    console.log('⚠️ Valid Amazon API Key not found. Falling back to mock data.');
                     return amazonService.getMockData(cleanKeyword);
                 }
+
+                lastApiHitTimestamp = Date.now();
+                console.log('📡 Calling Amazon PA-API for:', cleanKeyword);
 
                 const commonParameters = {
                     'AccessKey': process.env.AMAZON_ACCESS_KEY,
@@ -74,48 +73,38 @@ const amazonService = {
                     ]
                 };
 
-                lastApiHitTimestamp = Date.now();
-                console.log('📡 Hitting Official Amazon PA-API for:', cleanKeyword);
-
                 const data = await AmazonPaapi.SearchItems(commonParameters, requestParameters);
 
                 if (!data || !data.SearchResult || !data.SearchResult.Items) {
+                    console.warn('Amazon Search returned empty or invalid data.');
                     return amazonService.getMockData(cleanKeyword);
                 }
 
-                const results = data.SearchResult.Items.map(item => {
-                    const priceStr = item.Offers?.Listings?.[0]?.Price?.DisplayAmount || '0';
-                    const priceNum = parseFloat(priceStr.replace(/[^0-9.]/g, '')) || 0;
+                const results = data.SearchResult.Items.map(item => ({
+                    id: item.ASIN,
+                    title: item.ItemInfo.Title.DisplayValue,
+                    image: item.Images.Primary.Large.URL,
+                    price: parseFloat((item.Offers?.Listings?.[0]?.Price?.DisplayAmount || '0').replace(/[^0-9.]/g, '')) || 0,
+                    rating: item.CustomerReviews?.StarRating || 'N/A',
+                    reviewsCount: item.CustomerReviews?.Count || 0,
+                    link: item.DetailPageURL
+                }));
 
-                    return {
-                        id: item.ASIN,
-                        title: item.ItemInfo.Title.DisplayValue,
-                        image: item.Images.Primary.Large.URL,
-                        price: priceNum,
-                        rating: item.CustomerReviews?.StarRating || 'N/A',
-                        reviewsCount: item.CustomerReviews?.Count || 0,
-                        link: item.DetailPageURL
-                    };
-                });
-
-                // Store in cache
                 myCache.set(cacheKey, results);
                 return results;
 
-            } catch (error) {
-                console.error('❌ Amazon PA-API Error:', error.message || error);
-                // On error (Rate limit, Auth failure, etc), fallback to high-quality mock data 
-                // so the user experience is never broken
+            } catch (err) {
+                console.error('❌ Amazon Service Error:', err.message || err);
+                // ALWAYS return mock data on failure to prevent 500 errors
                 return amazonService.getMockData(cleanKeyword);
             } finally {
-                // Cleanup pending requests map
                 pendingRequests.delete(cacheKey);
             }
-        })();
+        };
 
-        // Track this promise so others can join it
-        pendingRequests.set(cacheKey, searchPromise);
-        return searchPromise;
+        const requestPromise = performSearch();
+        pendingRequests.set(cacheKey, requestPromise);
+        return requestPromise;
     },
 
     getMockData: (q) => [
