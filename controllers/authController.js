@@ -47,17 +47,36 @@ exports.register = async (req, res, next) => {
             isVerified: false,
         });
 
-        // Send Email
-        await emailService.sendOTPEmail(email, otp, name);
+        // Send Email - Use Promise.race to prevent hanging indefinitely or handle error gracefully
+        try {
+            // We set a timeout for the email sending but we don't await it strictly to block the user
+            // Or we await it but catch the error so we can still tell the user to check their email/resend
+            await Promise.race([
+                emailService.sendOTPEmail(email, otp, name),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
+            ]);
 
-        res.status(201).json({
-            success: true,
-            message: 'Registration successful. Please verify your email with the OTP sent.',
-            data: {
-                email: user.email,
-                isVerified: false
-            },
-        });
+            res.status(201).json({
+                success: true,
+                message: 'Registration successful. Please verify your email with the OTP sent.',
+                data: {
+                    email: user.email,
+                    isVerified: false
+                },
+            });
+        } catch (emailError) {
+            console.error('Email sending failed during registration:', emailError);
+            // Even if email fails, user is created, so we tell them to try resending OTP
+            res.status(201).json({
+                success: true,
+                message: 'Account created, but we had trouble sending the verification email. Please use the resend option on the next screen.',
+                data: {
+                    email: user.email,
+                    isVerified: false,
+                    emailError: true
+                },
+            });
+        }
     } catch (error) {
         next(error);
     }
@@ -180,12 +199,24 @@ exports.resendOtp = async (req, res, next) => {
         await user.save();
 
         // Send Email
-        await emailService.sendOTPEmail(email, otp, user.name);
+        try {
+            await Promise.race([
+                emailService.sendOTPEmail(email, otp, user.name),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
+            ]);
 
-        res.status(200).json({
-            success: true,
-            message: 'OTP resent successfully',
-        });
+            res.status(200).json({
+                success: true,
+                message: 'OTP resent successfully',
+            });
+        } catch (emailError) {
+            console.error('Email resending failed:', emailError);
+            res.status(200).json({
+                success: true,
+                message: 'OTP request received, but we had trouble sending the email. Please try again or check your spam.',
+                emailError: true
+            });
+        }
     } catch (error) {
         next(error);
     }
@@ -340,12 +371,24 @@ exports.forgotPassword = async (req, res, next) => {
         await user.save();
 
         // Send Reset Email
-        await emailService.sendResetPasswordEmail(email, otp, user.name);
+        try {
+            await Promise.race([
+                emailService.sendResetPasswordEmail(email, otp, user.name),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
+            ]);
 
-        res.status(200).json({
-            success: true,
-            message: 'Password reset OTP sent to your email',
-        });
+            res.status(200).json({
+                success: true,
+                message: 'Password reset OTP sent to your email',
+            });
+        } catch (emailError) {
+            console.error('Reset email failed:', emailError);
+            res.status(200).json({
+                success: true,
+                message: 'Reset request received, but we had trouble sending the email. Please try again or check your spam.',
+                emailError: true
+            });
+        }
     } catch (error) {
         next(error);
     }
