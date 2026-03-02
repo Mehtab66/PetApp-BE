@@ -1,5 +1,6 @@
 const MarketplaceItem = require('../models/MarketplaceItem');
 const User = require('../models/User');
+const amazonService = require('../services/amazonService');
 
 /**
  * @desc    Get all marketplace items with filters
@@ -12,7 +13,6 @@ exports.getItems = async (req, res, next) => {
         // Only show Amazon/Affiliate products, eliminate user listings
         let query = { status: 'Available', isAffiliate: true };
 
-        // ... filters ...
         if (category && category !== 'All' && category !== '') query.category = category;
         if (condition && condition !== 'All') query.condition = condition;
         if (minPrice || maxPrice) {
@@ -26,7 +26,40 @@ exports.getItems = async (req, res, next) => {
             .populate('sellerId', 'name photo')
             .sort(sortBy === 'price_low' ? { price: 1 } : sortBy === 'price_high' ? { price: -1 } : { createdAt: -1 });
 
-        // MAGIC SEEDER: If the store is empty, automatically seed some best-selling products
+        // DYNAMIC AMAZON INJECTION:
+        // If searching or browsing global items, fetch fresh results from Amazon to supplement the database
+        // This ensures the user always sees products even if we haven't imported them yet.
+        if ((!radius || radius === 'Anywhere') && (search || (items.length < 5))) {
+            const amazonKeyword = search || (category && category !== 'All' ? `pet ${category}` : 'pet best sellers');
+
+            console.log(`[MARKETPLACE] Supplementing results with Amazon products for: "${amazonKeyword}"`);
+            const amazonProducts = await amazonService.searchProducts(amazonKeyword);
+
+            // Map Amazon products to MarketplaceItem format for the frontend
+            const formattedAmazonItems = amazonProducts.map(p => ({
+                _id: `amazon_${p.id}`,
+                title: p.title,
+                description: `Amazon Choice: ${p.title}. Rated ${p.rating} by ${p.reviewsCount} users.`,
+                price: p.price,
+                category: category || 'Other',
+                condition: 'New',
+                images: [p.image],
+                address: 'Amazon Global',
+                isAffiliate: true,
+                affiliateLink: p.link,
+                rating: p.rating,
+                reviewsCount: p.reviewsCount,
+                isExternal: true // Flag to handle differently in UI if needed
+            }));
+
+            // Merge results, avoiding duplicates if possible (by title or ASIN)
+            const existingTitles = new Set(items.map(i => i.title.toLowerCase()));
+            const uniqueAmazonItems = formattedAmazonItems.filter(ai => !existingTitles.has(ai.title.toLowerCase()));
+
+            items = [...items, ...uniqueAmazonItems];
+        }
+
+        // MAGIC SEEDER (Fallback if everything else fails)
         if (items.length === 0 && !search && (!category || category === 'All')) {
             console.log('✨ Marketplace empty, seeding featured items...');
             const featured = [
@@ -42,39 +75,9 @@ exports.getItems = async (req, res, next) => {
                     isAffiliate: true,
                     affiliateLink: 'https://amzn.to/example1',
                     status: 'Available',
-                    sellerId: req.user.id // Assign to current user as placeholder
-                },
-                {
-                    title: 'Memory Foam Orthopedic Pet Bed',
-                    description: 'Ultra-soft memory foam with a removable, washable cover. Perfect for senior pets.',
-                    price: 79.00,
-                    category: 'Beds & Furniture',
-                    condition: 'New',
-                    images: ['https://images.unsplash.com/photo-1591946614421-1fbf121fca3c?w=500'],
-                    address: 'Amazon Global',
-                    location: { type: 'Point', coordinates: [0, 0] },
-                    isAffiliate: true,
-                    affiliateLink: 'https://amzn.to/example2',
-                    status: 'Available',
-                    sellerId: req.user.id
-                },
-                {
-                    title: 'Natural Grain-Free Salmon & Sweet Potato',
-                    description: 'High-protein, grain-free formula for sensitive stomachs.',
-                    price: 45.99,
-                    category: 'Food & Treats',
-                    condition: 'New',
-                    images: ['https://images.unsplash.com/photo-1589924691995-400dc9ecc119?w=500'],
-                    address: 'Amazon Global',
-                    location: { type: 'Point', coordinates: [0, 0] },
-                    isAffiliate: true,
-                    affiliateLink: 'https://amzn.to/example3',
-                    status: 'Available',
                     sellerId: req.user.id
                 }
             ];
-
-            // Create items and add them to the local 'items' array
             for (const f of featured) {
                 const newItem = await MarketplaceItem.create(f);
                 items.push(newItem);
@@ -98,6 +101,24 @@ exports.getItems = async (req, res, next) => {
  */
 exports.getItem = async (req, res, next) => {
     try {
+        if (req.params.id.startsWith('amazon_')) {
+            // This is a virtual Amazon item from the search supplement
+            return res.status(200).json({
+                success: true,
+                data: {
+                    item: {
+                        _id: req.params.id,
+                        isAffiliate: true,
+                        isExternal: true,
+                        title: 'Amazon Product',
+                        description: 'Please click "Buy on Amazon" to see full details.',
+                        price: 0,
+                        images: []
+                    }
+                }
+            });
+        }
+
         const item = await MarketplaceItem.findById(req.params.id)
             .populate('sellerId', 'name photo email phone');
 
@@ -108,7 +129,6 @@ exports.getItem = async (req, res, next) => {
             });
         }
 
-        // Increment views
         item.views += 1;
         await item.save();
 
@@ -162,7 +182,6 @@ exports.updateItem = async (req, res, next) => {
             });
         }
 
-        // Make sure user is owner
         if (item.sellerId.toString() !== req.user.id && req.user.role !== 'admin') {
             return res.status(401).json({
                 success: false,
@@ -172,7 +191,6 @@ exports.updateItem = async (req, res, next) => {
 
         const itemData = req.body.data ? JSON.parse(req.body.data) : req.body;
 
-        // Handle images if any
         if (req.files && req.files.length > 0) {
             const newImages = req.files.map(file => file.path);
             itemData.images = [...(item.images || []), ...newImages];
@@ -246,62 +264,22 @@ exports.getMyListings = async (req, res, next) => {
 };
 
 /**
- * @desc    Search products on Amazon (Simulated / PA-API placeholder)
+ * @desc    Search products on Amazon
  * @route   GET /api/marketplace/amazon/search
  * @access  Private
  */
 exports.searchAmazonProducts = async (req, res, next) => {
     try {
         const { q } = req.query;
+        if (!q) {
+            return res.status(400).json({ success: false, message: 'Search term required' });
+        }
 
-        // Mock data for "WOW" effect and demonstration
-        // In production, this would call Amazon PA-API or a 3rd party service
-        const mockProducts = [
-            {
-                id: 'B08F2V1N62',
-                title: `${q || 'Pet'} Healthy Grain-Free Dry Dog Food`,
-                description: 'Natural ingredients, high protein, and essential vitamins for your pup.',
-                price: 45.99,
-                image: 'https://images.unsplash.com/photo-1589924691995-400dc9ecc119?auto=format&fit=crop&q=80&w=500',
-                link: 'https://www.amazon.com/dp/B08F2V1N62',
-                category: 'Food & Treats',
-                rating: 4.8
-            },
-            {
-                id: 'B07H8N3Q2G',
-                title: `Interactive ${q || 'Pet'} Plush Chew Toy`,
-                description: 'Durable, squeaky, and perfect for aggressive chewers.',
-                price: 12.50,
-                image: 'https://images.unsplash.com/photo-1576201836106-041d501f3c5e?auto=format&fit=crop&q=80&w=500',
-                link: 'https://www.amazon.com/dp/B07H8N3Q2G',
-                category: 'Toys',
-                rating: 4.5
-            },
-            {
-                id: 'B01N26A18Q',
-                title: `Orthopedic ${q || 'Pet'} Bed for Large Dogs`,
-                description: 'Memory foam base providing maximum comfort and joint support.',
-                price: 89.00,
-                image: 'https://images.unsplash.com/photo-1591946614421-1fbf121fca3c?auto=format&fit=crop&q=80&w=500',
-                link: 'https://www.amazon.com/dp/B01N26A18Q',
-                category: 'Beds & Furniture',
-                rating: 4.9
-            },
-            {
-                id: 'B07ZPCMK78',
-                title: `Self-Cleaning ${q || 'Pet'} Slicker Brush`,
-                description: 'Effective tool for deshedding and grooming cats and dogs.',
-                price: 15.99,
-                image: 'https://images.unsplash.com/photo-1516734212186-a967f81ad0d7?auto=format&fit=crop&q=80&w=500',
-                link: 'https://www.amazon.com/dp/B07ZPCMK78',
-                category: 'Health & Grooming',
-                rating: 4.7
-            }
-        ];
+        const products = await amazonService.searchProducts(q);
 
         res.status(200).json({
             success: true,
-            data: { products: mockProducts }
+            data: { products }
         });
     } catch (error) {
         next(error);
@@ -329,7 +307,7 @@ exports.importSelectedProducts = async (req, res, next) => {
         for (const prod of products) {
             const newItem = await MarketplaceItem.create({
                 title: prod.title,
-                description: prod.description,
+                description: prod.description || `High quality product from Amazon.`,
                 price: prod.price,
                 category: prod.category || 'Other',
                 condition: 'New',
@@ -337,7 +315,7 @@ exports.importSelectedProducts = async (req, res, next) => {
                 address: 'Online',
                 location: {
                     type: 'Point',
-                    coordinates: [0, 0] // Default for online/global items
+                    coordinates: [0, 0]
                 },
                 sellerId: req.user.id,
                 affiliateLink: prod.link,

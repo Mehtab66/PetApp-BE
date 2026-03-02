@@ -14,22 +14,28 @@ let lastApiHitTimestamp = 0;
 const MIN_COOLDOWN_MS = 2000;
 
 const amazonService = {
+    isTemporarilyDisabled: false, // Circuit breaker for Auth errors
     searchProducts: async (keyword) => {
         const cleanKeyword = keyword.trim().toLowerCase();
         if (!cleanKeyword) return [];
+
+        if (amazonService.isTemporarilyDisabled) {
+            console.log('[AMAZON_LOG] 🛡️ CIRCUIT_BREAKER: Skipping API due to temporary disablement');
+            return amazonService.getMockData(cleanKeyword);
+        }
 
         const cacheKey = `search_${cleanKeyword.replace(/\s+/g, '_')}`;
 
         // 1. Check Memory Cache
         const cachedResults = myCache.get(cacheKey);
         if (cachedResults) {
-            console.log('🚀 Returning CACHED Amazon results for:', cleanKeyword);
+            console.log(`[AMAZON_LOG] 📦 CACHE_HIT: Keyword "${cleanKeyword}"`);
             return cachedResults;
         }
 
         // 2. Coalescing: Check if a request for this keyword is already in flight
         if (pendingRequests.has(cacheKey)) {
-            console.log('⏳ Joining existing ongoing request for:', cleanKeyword);
+            console.log(`[AMAZON_LOG] ⏳ COALESCING: Request for "${cleanKeyword}" already in flight`);
             return pendingRequests.get(cacheKey);
         }
 
@@ -39,17 +45,19 @@ const amazonService = {
                 // Rate Limiting / Cooldown
                 const now = Date.now();
                 if (now - lastApiHitTimestamp < MIN_COOLDOWN_MS) {
-                    await new Promise(r => setTimeout(r, MIN_COOLDOWN_MS - (now - lastApiHitTimestamp)));
+                    const wait = MIN_COOLDOWN_MS - (now - lastApiHitTimestamp);
+                    console.log(`[AMAZON_LOG] ⏸️ RATE_LIMIT: Waiting ${wait}ms before calling API`);
+                    await new Promise(r => setTimeout(r, wait));
                 }
 
                 // API Key check
                 if (!process.env.AMAZON_ACCESS_KEY || process.env.AMAZON_ACCESS_KEY.includes('YOUR_KEY')) {
-                    console.log('⚠️ Valid Amazon API Key not found. Falling back to mock data.');
+                    console.log('[AMAZON_LOG] ⚠️ KEY_MISSING: Falling back to mock data');
                     return amazonService.getMockData(cleanKeyword);
                 }
 
                 lastApiHitTimestamp = Date.now();
-                console.log('📡 Calling Amazon PA-API for:', cleanKeyword);
+                console.log(`[AMAZON_LOG] 📡 API_REQUEST: Fetching "${cleanKeyword}" from PA-API`);
 
                 const commonParameters = {
                     'AccessKey': process.env.AMAZON_ACCESS_KEY,
@@ -59,6 +67,7 @@ const amazonService = {
                     'Marketplace': 'www.amazon.com',
                     'Region': 'us-east-1'
                 };
+                console.log(commonParameters);
 
                 const requestParameters = {
                     'Keywords': cleanKeyword,
@@ -75,8 +84,10 @@ const amazonService = {
 
                 const data = await AmazonPaapi.SearchItems(commonParameters, requestParameters);
 
+                console.log(`[AMAZON_LOG] ✅ API_RESPONSE: Received data from Amazon`);
+
                 if (!data || !data.SearchResult || !data.SearchResult.Items) {
-                    console.warn('Amazon Search returned empty or invalid data.');
+                    console.warn('[AMAZON_LOG] ⚠️ EMPTY_RESPONSE: Amazon search returned no items');
                     return amazonService.getMockData(cleanKeyword);
                 }
 
@@ -90,13 +101,29 @@ const amazonService = {
                     link: item.DetailPageURL
                 }));
 
+                console.log(`[AMAZON_LOG] 💾 CACHING: Stored ${results.length} items for "${cleanKeyword}"`);
                 myCache.set(cacheKey, results);
                 return results;
 
             } catch (err) {
-                console.error('❌ Amazon Service Error:', err.message || err);
+                const errorMessage = err.message || String(err);
+                console.error('[AMAZON_LOG] ❌ API_ERROR:', errorMessage);
+
+                // If it's an auth error, we might want to skip future calls for a while
+                if (errorMessage.includes('Unauthorized') || errorMessage.includes('Authentication')) {
+                    console.log('[AMAZON_LOG] 🛡️ AUTH_ERROR: Setting 1-hour global skip to prevent blocking');
+                    amazonService.isTemporarilyDisabled = true;
+                    setTimeout(() => { amazonService.isTemporarilyDisabled = false; }, 3600000);
+                }
+
                 // ALWAYS return mock data on failure to prevent 500 errors
-                return amazonService.getMockData(cleanKeyword);
+                const mockResults = amazonService.getMockData(cleanKeyword);
+
+                // CACHING THE FAILURE: Store mock results for 1 hour so we don't retry this keyword immediately
+                console.log(`[AMAZON_LOG] 💾 CACHING_MOCK: Storing fallback for "${cleanKeyword}" to avoid retries`);
+                myCache.set(cacheKey, mockResults, 3600);
+
+                return mockResults;
             } finally {
                 pendingRequests.delete(cacheKey);
             }
@@ -139,4 +166,3 @@ const amazonService = {
 };
 
 module.exports = amazonService;
-
