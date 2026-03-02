@@ -316,6 +316,82 @@ exports.updateProfile = async (req, res, next) => {
     }
 };
 /**
+ * @desc    Forgot Password - Send OTP
+ * @route   POST /api/auth/forgot-password
+ * @access  Public
+ */
+exports.forgotPassword = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'No user found with that email',
+            });
+        }
+
+        // Generate Reset OTP
+        const otp = generateOTP();
+        user.resetPasswordOTP = otp;
+        user.resetPasswordExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+        await user.save();
+
+        // Send Reset Email
+        await emailService.sendResetPasswordEmail(email, otp, user.name);
+
+        res.status(200).json({
+            success: true,
+            message: 'Password reset OTP sent to your email',
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Reset Password - Verify OTP and update password
+ * @route   POST /api/auth/reset-password
+ * @access  Public
+ */
+exports.resetPassword = async (req, res, next) => {
+    try {
+        const { email, otp, newPassword } = req.body;
+
+        const user = await User.findOne({ email }).select('+password');
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+        }
+
+        // Check if OTP match and not expired
+        if (user.resetPasswordOTP !== otp || user.resetPasswordExpire < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired reset code',
+            });
+        }
+
+        // Set new password
+        user.password = newPassword;
+        user.resetPasswordOTP = undefined;
+        user.resetPasswordExpire = undefined;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Password reset successful. You can now login with your new password.',
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+/**
  * @desc    Change user password
  * @route   PUT /api/auth/password
  * @access  Private

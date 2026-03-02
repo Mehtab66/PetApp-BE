@@ -133,6 +133,47 @@ const getOTPTemplate = (otp, userName) => {
 };
 
 /**
+ * Generate Password Reset Email Template
+ * @param {string} otp - The OTP code
+ * @param {string} userName - The user's name
+ * @returns {string} - HTML Email Template
+ */
+const getResetPasswordTemplate = (otp, userName) => {
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Reset Your Password - PetVitals</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f7f9fc; margin: 0; padding: 0; color: #333; }
+            .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05); }
+            .header { background: linear-gradient(135deg, #ef4444 0%, #f97316 100%); padding: 40px 20px; text-align: center; color: #ffffff; }
+            .content { padding: 40px 30px; text-align: center; }
+            .otp-container { background-color: #fef2f2; padding: 20px; border-radius: 8px; display: inline-block; margin: 20px 0; border: 1px dashed #ef4444; }
+            .otp-code { font-size: 36px; font-weight: 800; color: #ef4444; letter-spacing: 8px; margin: 0; }
+            .footer { background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header"><h1>PetVitals</h1></div>
+            <div class="content">
+                <h2>Password Reset Request</h2>
+                <p>Hi <strong>${userName}</strong>,</p>
+                <p>We received a request to reset your password. Use the verification code below to proceed with the reset:</p>
+                <div class="otp-container"><div class="otp-code">${otp}</div></div>
+                <p>This code will expire in 10 minutes. If you didn't request this, please secure your account immediately.</p>
+            </div>
+            <div class="footer"><p>&copy; 2025 PetVitals Inc.</p></div>
+        </div>
+    </body>
+    </html>
+    `;
+};
+
+/**
  * Send OTP Email
  * @param {string} email - Recipient email
  * @param {string} otp - The OTP code
@@ -159,6 +200,36 @@ exports.sendOTPEmail = async (email, otp, userName) => {
         return true;
     } catch (error) {
         console.error('Error sending email:', error);
+        return false;
+    }
+};
+
+/**
+ * Send Password Reset Email
+ * @param {string} email - Recipient email
+ * @param {string} otp - The OTP code
+ * @param {string} userName - The user's name
+ */
+exports.sendResetPasswordEmail = async (email, otp, userName) => {
+    try {
+        const mailOptions = {
+            from: `"PetVitals Support" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Reset Your Password - PetVitals',
+            html: getResetPasswordTemplate(otp, userName),
+        };
+
+        if (process.env.NODE_ENV === 'development' && !process.env.EMAIL_USER) {
+            console.log('-----------------------------------------');
+            console.log(`DEV MODE: RESET OTP for ${email} is: ${otp}`);
+            console.log('-----------------------------------------');
+            return true;
+        }
+
+        const info = await transporter.sendMail(mailOptions);
+        return true;
+    } catch (error) {
+        console.error('Error sending reset email:', error);
         return false;
     }
 };

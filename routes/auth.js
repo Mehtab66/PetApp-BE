@@ -35,6 +35,16 @@ router.post('/verify-otp', otpRateLimiter, authController.verifyOtp);
 // @access  Public
 router.post('/resend-otp', otpRateLimiter, authController.resendOtp);
 
+// @route   POST /api/auth/forgot-password
+// @desc    Forgot password
+// @access  Public
+router.post('/forgot-password', otpRateLimiter, authController.forgotPassword);
+
+// @route   POST /api/auth/reset-password
+// @desc    Reset password
+// @access  Public
+router.post('/reset-password', otpRateLimiter, authController.resetPassword);
+
 // @route   GET /api/auth/profile
 // @desc    Get user profile
 // @access  Private
