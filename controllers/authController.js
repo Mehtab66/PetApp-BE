@@ -1,9 +1,16 @@
 const User = require('../models/User');
+const emailService = require('../services/emailService');
+const crypto = require('crypto');
 
 /**
  * Auth Controller
  * Handles user authentication and profile management
  */
+
+// Helper to generate 6-digit OTP
+const generateOTP = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 /**
  * @desc    Register new user
@@ -23,30 +30,161 @@ exports.register = async (req, res, next) => {
             });
         }
 
-        // Create user
+        // Generate OTP
+        const otp = generateOTP();
+        const otpExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+
+        // Create user (unverified)
         const user = await User.create({
             name,
             email,
             password,
             phone,
+            otpCode: otp,
+            otpExpire,
+            otpCount: 1,
+            lastOtpSent: new Date(),
+            isVerified: false,
         });
+
+        // Send Email
+        await emailService.sendOTPEmail(email, otp, name);
+
+        res.status(201).json({
+            success: true,
+            message: 'Registration successful. Please verify your email with the OTP sent.',
+            data: {
+                email: user.email,
+                isVerified: false
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Verify OTP
+ * @route   POST /api/auth/verify-otp
+ * @access  Public
+ */
+exports.verifyOtp = async (req, res, next) => {
+    try {
+        const { email, otp } = req.body;
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+        }
+
+        if (user.isVerified) {
+            return res.status(400).json({
+                success: false,
+                message: 'User is already verified',
+            });
+        }
+
+        // Check if OTP match and not expired
+        if (user.otpCode !== otp || user.otpExpire < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired OTP',
+            });
+        }
+
+        // Update user status
+        user.isVerified = true;
+        user.otpCode = undefined;
+        user.otpExpire = undefined;
+        await user.save();
 
         // Generate token
         const token = user.generateToken();
 
-        res.status(201).json({
+        res.status(200).json({
             success: true,
-            message: 'User registered successfully',
+            message: 'Email verified successfully',
             data: {
                 user: {
                     id: user._id,
                     name: user.name,
                     email: user.email,
-                    phone: user.phone,
-                    createdAt: user.createdAt,
                 },
                 token,
             },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Resend OTP
+ * @route   POST /api/auth/resend-otp
+ * @access  Public
+ */
+exports.resendOtp = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+        }
+
+        if (user.isVerified) {
+            return res.status(400).json({
+                success: false,
+                message: 'User is already verified',
+            });
+        }
+
+        // Rate limiting validation: prevent too many OTPs
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+        // Reset count if last sent was more than an hour ago
+        if (user.lastOtpSent < oneHourAgo) {
+            user.otpCount = 0;
+        }
+
+        if (user.otpCount >= 5) {
+            return res.status(429).json({
+                success: false,
+                message: 'Too many OTP requests. Please try again after an hour.',
+            });
+        }
+
+        // Prevent resending too quickly (e.g., within 1 minute)
+        const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+        if (user.lastOtpSent > oneMinuteAgo) {
+            return res.status(429).json({
+                success: false,
+                message: 'Please wait 60 seconds before requesting another OTP.',
+            });
+        }
+
+        // Generate new OTP
+        const otp = generateOTP();
+        user.otpCode = otp;
+        user.otpExpire = new Date(Date.now() + 10 * 60 * 1000);
+        user.otpCount += 1;
+        user.lastOtpSent = new Date();
+        await user.save();
+
+        // Send Email
+        await emailService.sendOTPEmail(email, otp, user.name);
+
+        res.status(200).json({
+            success: true,
+            message: 'OTP resent successfully',
         });
     } catch (error) {
         next(error);
@@ -62,12 +200,21 @@ exports.login = async (req, res, next) => {
     try {
         const { email, password } = req.body;
 
-        // Check if user exists (include password for comparison)
+        // Check if user exists
         const user = await User.findOne({ email }).select('+password');
         if (!user) {
             return res.status(401).json({
                 success: false,
                 message: 'Invalid credentials',
+            });
+        }
+
+        // Check verification
+        if (!user.isVerified) {
+            return res.status(403).json({
+                success: false,
+                message: 'Please verify your email before logging in',
+                data: { isVerified: false, email: user.email }
             });
         }
 

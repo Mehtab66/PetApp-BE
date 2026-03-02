@@ -1,0 +1,164 @@
+const nodemailer = require('nodemailer');
+const config = require('../config/config');
+
+/**
+ * Email Service
+ * Handles sending emails using nodemailer
+ */
+
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+    port: process.env.EMAIL_PORT || 587,
+    secure: false, // true for 465, false for other ports
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+    },
+});
+
+/**
+ * Generate OTP Email Template
+ * @param {string} otp - The OTP code
+ * @param {string} userName - The user's name
+ * @returns {string} - HTML Email Template
+ */
+const getOTPTemplate = (otp, userName) => {
+    return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Verify Your PetVitals Account</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #f7f9fc;
+                margin: 0;
+                padding: 0;
+                color: #333;
+            }
+            .container {
+                max-width: 600px;
+                margin: 20px auto;
+                background-color: #ffffff;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            }
+            .header {
+                background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                padding: 40px 20px;
+                text-align: center;
+                color: #ffffff;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 28px;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+            }
+            .content {
+                padding: 40px 30px;
+                text-align: center;
+            }
+            .content p {
+                font-size: 16px;
+                line-height: 1.6;
+                color: #4b5563;
+                margin-bottom: 25px;
+            }
+            .otp-container {
+                background-color: #f3f4f6;
+                padding: 20px;
+                border-radius: 8px;
+                display: inline-block;
+                margin: 20px 0;
+            }
+            .otp-code {
+                font-size: 36px;
+                font-weight: 800;
+                color: #4f46e5;
+                letter-spacing: 8px;
+                margin: 0;
+            }
+            .footer {
+                background-color: #f9fafb;
+                padding: 20px;
+                text-align: center;
+                border-top: 1px solid #e5e7eb;
+            }
+            .footer p {
+                font-size: 13px;
+                color: #9ca3af;
+                margin: 0;
+            }
+            .social-links {
+                margin-top: 15px;
+            }
+            @media screen and (max-width: 480px) {
+                .container {
+                    margin: 0;
+                    border-radius: 0;
+                }
+                .content {
+                    padding: 30px 20px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>PetVitals</h1>
+            </div>
+            <div class="content">
+                <h2>Verify Your Email</h2>
+                <p>Hi <strong>${userName}</strong>,</p>
+                <p>Welcome to PetVitals! To complete your registration and ensure your pet's data is secure, please use the verification code below:</p>
+                <div class="otp-container">
+                    <div class="otp-code">${otp}</div>
+                </div>
+                <p>This code will expire in 10 minutes. If you didn't request this, you can safely ignore this email.</p>
+                <p>Paws and love,<br>The PetVitals Team</p>
+            </div>
+            <div class="footer">
+                <p>&copy; 2025 PetVitals Inc. All rights reserved.</p>
+                <p>If you have any questions, contact us at pethealthvitals@gmail.com</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+};
+
+/**
+ * Send OTP Email
+ * @param {string} email - Recipient email
+ * @param {string} otp - The OTP code
+ * @param {string} userName - The user's name
+ */
+exports.sendOTPEmail = async (email, otp, userName) => {
+    try {
+        const mailOptions = {
+            from: `"PetVitals Support" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Verify Your Account - PetVitals',
+            html: getOTPTemplate(otp, userName),
+        };
+
+        if (process.env.NODE_ENV === 'development' && !process.env.EMAIL_USER) {
+            console.log('-----------------------------------------');
+            console.log(`DEV MODE: OTP for ${email} is: ${otp}`);
+            console.log('-----------------------------------------');
+            return true;
+        }
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Message sent: %s', info.messageId);
+        return true;
+    } catch (error) {
+        console.error('Error sending email:', error);
+        return false;
+    }
+};
