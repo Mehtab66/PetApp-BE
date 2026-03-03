@@ -1,0 +1,58 @@
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const pendingUserSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        lowercase: true,
+        trim: true,
+    },
+    password: {
+        type: String,
+        required: true,
+    },
+    phone: {
+        type: String,
+        trim: true,
+    },
+    otpCode: {
+        type: String,
+        required: true,
+    },
+    otpExpire: {
+        type: Date,
+        required: true,
+    },
+    otpCount: {
+        type: Number,
+        default: 1,
+    },
+    lastOtpSent: {
+        type: Date,
+        default: Date.now,
+    },
+    createdAt: {
+        type: Date,
+        default: Date.now,
+        index: { expires: '10m' } // Automatically delete unverified users after 10 mins
+    },
+});
+
+// Hash password before saving
+pendingUserSchema.pre('save', async function (next) {
+    if (!this.isModified('password')) {
+        next();
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+});
+
+module.exports = mongoose.model('PendingUser', pendingUserSchema);

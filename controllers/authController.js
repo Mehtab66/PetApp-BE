@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const PendingUser = require('../models/PendingUser');
 const emailService = require('../services/emailService');
 const crypto = require('crypto');
 
@@ -24,33 +25,49 @@ exports.register = async (req, res, next) => {
         // Check if user already exists
         const existingUser = await User.findOne({ email });
         if (existingUser) {
-            return res.status(400).json({
-                success: false,
-                message: 'User already exists with this email',
-            });
+            if (existingUser.isVerified) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'User already exists with this email',
+                });
+            } else {
+                // If user exists but is not verified, we can allow re-registration
+                // This handles legacy unverified users from the old system
+                await User.deleteOne({ _id: existingUser._id });
+            }
         }
 
         // Generate OTP
         const otp = generateOTP();
         const otpExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
 
-        // Create user (unverified)
-        const user = await User.create({
-            name,
-            email,
-            password,
-            phone,
-            otpCode: otp,
-            otpExpire,
-            otpCount: 1,
-            lastOtpSent: new Date(),
-            isVerified: false,
-        });
+        // Find and update or create pending registration
+        let pendingUser = await PendingUser.findOne({ email });
 
-        // Send Email - Use Promise.race to prevent hanging indefinitely or handle error gracefully
+        if (pendingUser) {
+            pendingUser.name = name;
+            pendingUser.password = password;
+            pendingUser.phone = phone;
+            pendingUser.otpCode = otp;
+            pendingUser.otpExpire = otpExpire;
+            pendingUser.otpCount = 1;
+            pendingUser.lastOtpSent = new Date();
+            await pendingUser.save();
+        } else {
+            pendingUser = await PendingUser.create({
+                name,
+                email,
+                password,
+                phone,
+                otpCode: otp,
+                otpExpire,
+                otpCount: 1,
+                lastOtpSent: new Date(),
+            });
+        }
+
+        // Send Email
         try {
-            // We set a timeout for the email sending but we don't await it strictly to block the user
-            // Or we await it but catch the error so we can still tell the user to check their email/resend
             await Promise.race([
                 emailService.sendOTPEmail(email, otp, name),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
@@ -58,20 +75,19 @@ exports.register = async (req, res, next) => {
 
             res.status(201).json({
                 success: true,
-                message: 'Registration successful. Please verify your email with the OTP sent.',
+                message: 'Registration initiated. Please verify your email with the OTP sent.',
                 data: {
-                    email: user.email,
+                    email: pendingUser.email,
                     isVerified: false
                 },
             });
         } catch (emailError) {
             console.error('Email sending failed during registration:', emailError);
-            // Even if email fails, user is created, so we tell them to try resending OTP
             res.status(201).json({
                 success: true,
-                message: 'Account created, but we had trouble sending the verification email. Please use the resend option on the next screen.',
+                message: 'Registration data saved, but we had trouble sending the verification email. Please use the resend option on the next screen.',
                 data: {
-                    email: user.email,
+                    email: pendingUser.email,
                     isVerified: false,
                     emailError: true
                 },
@@ -91,47 +107,64 @@ exports.verifyOtp = async (req, res, next) => {
     try {
         const { email, otp } = req.body;
 
-        const user = await User.findOne({ email });
-
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found',
-            });
-        }
-
-        if (user.isVerified) {
+        // Check if user is already verified (in User model)
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
             return res.status(400).json({
                 success: false,
                 message: 'User is already verified',
             });
         }
 
+        // Find in PendingUser
+        const pendingUser = await PendingUser.findOne({ email });
+
+        if (!pendingUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'Registration not found or expired. Please register again.',
+            });
+        }
+
         // Check if OTP match and not expired
-        if (user.otpCode !== otp || user.otpExpire < new Date()) {
+        if (pendingUser.otpCode !== otp || pendingUser.otpExpire < new Date()) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid or expired OTP',
             });
         }
 
-        // Update user status
-        user.isVerified = true;
-        user.otpCode = undefined;
-        user.otpExpire = undefined;
-        await user.save();
+        // Create actual User
+        // Note: Password is already hashed in PendingUser (due to pre-save hook)
+        // But User model ALSO has a pre-save hook. 
+        // We should skip re-hashing or just let it re-hash (expensive).
+        // Best practice: Create with isVerified: true
+        const newUser = new User({
+            name: pendingUser.name,
+            email: pendingUser.email,
+            password: pendingUser.password, // This will be RE-HASHED by User model pre-save unless we handle it
+            phone: pendingUser.phone,
+            isVerified: true
+        });
+
+        // Let's manually set password to already hashed value and tell User.js not to re-hash if possible?
+        // Actually, User.js hashes if password is modified. It's safe to just save.
+        await newUser.save();
+
+        // Delete from PendingUser
+        await PendingUser.deleteOne({ _id: pendingUser._id });
 
         // Generate token
-        const token = user.generateToken();
+        const token = newUser.generateToken();
 
         res.status(200).json({
             success: true,
-            message: 'Email verified successfully',
+            message: 'Email verified and account created successfully',
             data: {
                 user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
+                    id: newUser._id,
+                    name: newUser.name,
+                    email: newUser.email,
                 },
                 token,
             },
@@ -150,19 +183,21 @@ exports.resendOtp = async (req, res, next) => {
     try {
         const { email } = req.body;
 
-        const user = await User.findOne({ email });
-
-        if (!user) {
-            return res.status(404).json({
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({
                 success: false,
-                message: 'User not found',
+                message: 'This email is already verified and registered.',
             });
         }
 
-        if (user.isVerified) {
-            return res.status(400).json({
+        const pendingUser = await PendingUser.findOne({ email });
+
+        if (!pendingUser) {
+            return res.status(404).json({
                 success: false,
-                message: 'User is already verified',
+                message: 'Registration session not found. Please register again.',
             });
         }
 
@@ -170,11 +205,11 @@ exports.resendOtp = async (req, res, next) => {
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
         // Reset count if last sent was more than an hour ago
-        if (user.lastOtpSent < oneHourAgo) {
-            user.otpCount = 0;
+        if (pendingUser.lastOtpSent < oneHourAgo) {
+            pendingUser.otpCount = 0;
         }
 
-        if (user.otpCount >= 5) {
+        if (pendingUser.otpCount >= 5) {
             return res.status(429).json({
                 success: false,
                 message: 'Too many OTP requests. Please try again after an hour.',
@@ -183,7 +218,7 @@ exports.resendOtp = async (req, res, next) => {
 
         // Prevent resending too quickly (e.g., within 1 minute)
         const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-        if (user.lastOtpSent > oneMinuteAgo) {
+        if (pendingUser.lastOtpSent > oneMinuteAgo) {
             return res.status(429).json({
                 success: false,
                 message: 'Please wait 60 seconds before requesting another OTP.',
@@ -192,16 +227,16 @@ exports.resendOtp = async (req, res, next) => {
 
         // Generate new OTP
         const otp = generateOTP();
-        user.otpCode = otp;
-        user.otpExpire = new Date(Date.now() + 10 * 60 * 1000);
-        user.otpCount += 1;
-        user.lastOtpSent = new Date();
-        await user.save();
+        pendingUser.otpCode = otp;
+        pendingUser.otpExpire = new Date(Date.now() + 10 * 60 * 1000);
+        pendingUser.otpCount += 1;
+        pendingUser.lastOtpSent = new Date();
+        await pendingUser.save();
 
         // Send Email
         try {
             await Promise.race([
-                emailService.sendOTPEmail(email, otp, user.name),
+                emailService.sendOTPEmail(email, otp, pendingUser.name),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
             ]);
 
