@@ -136,22 +136,16 @@ exports.verifyOtp = async (req, res, next) => {
 
         // Create actual User
         // Note: Password is already hashed in PendingUser (due to pre-save hook)
-        // But User model ALSO has a pre-save hook. 
-        // We should skip re-hashing or just let it re-hash (expensive).
-        // Best practice: Create with isVerified: true
+        // User.js pre-save hook has been updated to not re-hash if it's already a bcrypt hash
         const newUser = new User({
             name: pendingUser.name,
             email: pendingUser.email,
-            password: pendingUser.password, // This will be RE-HASHED by User model pre-save unless we handle it
+            password: pendingUser.password, // Prevented from double-hashing by User model logic
             phone: pendingUser.phone,
             isVerified: true
         });
 
-        // Let's manually set password to already hashed value and tell User.js not to re-hash if possible?
-        // Actually, User.js hashes if password is modified. It's safe to just save.
         await newUser.save();
-
-        // Delete from PendingUser
         await PendingUser.deleteOne({ _id: pendingUser._id });
 
         // Generate token
