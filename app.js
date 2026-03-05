@@ -1,4 +1,6 @@
 require('dotenv').config();
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first'); // Force IPv4 to prevent Nodemailer ENETUNREACH on Render
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -23,6 +25,9 @@ const amazonRoutes = require('./routes/amazon');
 
 // Initialize express app
 const app = express();
+
+// Trust proxy for Render load balancers (fixes express-rate-limit error)
+app.set('trust proxy', 1);
 
 // Connect to database
 connectDB();
