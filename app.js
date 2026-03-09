@@ -22,6 +22,7 @@ const publicRoutes = require('./routes/public');
 const marketplaceRoutes = require('./routes/marketplace');
 const amazonRoutes = require('./routes/amazon');
 const weightRoutes = require('./routes/weight');
+const walkRoutes = require('./routes/walk');
 
 
 // Initialize express app
@@ -62,6 +63,7 @@ app.use('/api/public', publicRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/amazon', amazonRoutes);
 app.use('/api/weight', weightRoutes);
+app.use('/api/walks', walkRoutes);
 
 
 // Health check route
