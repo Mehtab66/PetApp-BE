@@ -21,6 +21,7 @@ const vaultRoutes = require('./routes/vault');
 const publicRoutes = require('./routes/public');
 const marketplaceRoutes = require('./routes/marketplace');
 const amazonRoutes = require('./routes/amazon');
+const weightRoutes = require('./routes/weight');
 
 
 // Initialize express app
@@ -60,6 +61,7 @@ app.use('/api/vault', vaultRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/amazon', amazonRoutes);
+app.use('/api/weight', weightRoutes);
 
 
 // Health check route
