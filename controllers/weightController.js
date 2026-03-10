@@ -86,16 +86,39 @@ exports.analyzeWeightTrend = async (req, res, next) => {
             });
         }
 
-        const ageDetails = pet.age ? `${pet.age} years old` : 'age unknown';
+        // Calculate age from dateOfBirth if available, else fall back to stored age field
+        let ageDetails = 'age unknown';
+        if (pet.dateOfBirth) {
+            const today = new Date();
+            const birth = new Date(pet.dateOfBirth);
+            let years = today.getFullYear() - birth.getFullYear();
+            const monthDiff = today.getMonth() - birth.getMonth();
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) years--;
+            const months = ((today.getFullYear() - birth.getFullYear()) * 12) + (today.getMonth() - birth.getMonth());
+            if (years < 1) {
+                ageDetails = `${Math.max(months, 1)} month${months !== 1 ? 's' : ''} old`;
+            } else {
+                ageDetails = `${years} year${years !== 1 ? 's' : ''} old`;
+            }
+        } else if (pet.age) {
+            ageDetails = `${pet.age} years old`;
+        }
+
+        const currentWeight = pet.weight ? `Current weight on file: ${pet.weight} ${pet.weightUnit}.` : '';
+        const breedInfo = pet.breed ? `${pet.breed} ` : '';
+        const genderInfo = pet.gender && pet.gender !== 'Unknown' ? `, ${pet.gender}` : '';
         const weightHistory = logs.map(l => `${l.weight} ${l.unit} on ${l.date.toISOString().split('T')[0]}`).join(', ');
 
         const prompt = `You are an expert veterinary assistant AI.
-        Assess the weight history for a ${ageDetails} ${pet.breed || ''} ${pet.type}.
-        The recorded weight history (in chronological order) is: ${weightHistory}.
-        
-        Is this weight trend healthy? Are they at a healthy weight overall for their breed/age?
-        Provide a short, empathetic, and encouraging 2-3 sentence summary addressed to the owner. Do not diagnose medical conditions, just assess the trend.
-        DO NOT include markdown, just return plain text.`;
+        The pet's name is ${pet.name}, a ${ageDetails}${genderInfo} ${breedInfo}${pet.type}. ${currentWeight}
+        Weight history (chronological): ${weightHistory}.
+
+        Tasks:
+        1. Comment on whether the weight trend (gaining, losing, stable) looks healthy for ${pet.name}'s age, breed, and size.
+        2. Note whether the current weight appears to be in a healthy range for a ${breedInfo}${pet.type} of this age.
+        3. Give one brief, practical tip if relevant.
+
+        Write 2-3 sentences addressed to the owner, mentioning ${pet.name} by name. Be warm, encouraging, and concise. Do NOT diagnose medical conditions. Do NOT use markdown.`;
 
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
