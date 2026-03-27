@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
 const config = require('../config/config');
 
 /**
@@ -15,7 +16,15 @@ const transporter = nodemailer.createTransport({
         pass: process.env.EMAIL_PASS,
     },
     // FORCE IPv4 to avoid ENETUNREACH errors on cloud platforms like Render
+    // We use a custom lookup function to ensure we only get IPv4 addresses
+    lookup: (hostname, options, callback) => {
+        return dns.lookup(hostname, { family: 4 }, callback);
+    },
     family: 4,
+    // Add timeouts to prevent hanging the entire request if SMTP is slow
+    connectionTimeout: 15000, // 15 seconds
+    greetingTimeout: 15000,   // 15 seconds
+    socketTimeout: 20000,     // 20 seconds
     tls: {
         rejectUnauthorized: false
     }
