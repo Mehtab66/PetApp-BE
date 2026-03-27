@@ -1,5 +1,4 @@
 const MarketplaceItem = require('../models/MarketplaceItem');
-const User = require('../models/User');
 const amazonService = require('../services/amazonService');
 
 /**
@@ -9,12 +8,12 @@ const amazonService = require('../services/amazonService');
  */
 exports.getItems = async (req, res, next) => {
     try {
-        const { lat, lng, radius, category, search, minPrice, maxPrice, condition, sortBy } = req.query;
-        // Only show Amazon/Affiliate products, eliminate user listings
-        let query = { status: 'Available', isAffiliate: true };
+        const { category, search, minPrice, maxPrice, sortBy } = req.query;
+
+        // Only show available Amazon products
+        let query = { status: 'Available' };
 
         if (category && category !== 'All' && category !== '') query.category = category;
-        if (condition && condition !== 'All') query.condition = condition;
         if (minPrice || maxPrice) {
             query.price = {};
             if (minPrice) query.price.$gte = parseFloat(minPrice);
@@ -22,66 +21,47 @@ exports.getItems = async (req, res, next) => {
         }
         if (search) query.$text = { $search: search };
 
-        let items = await MarketplaceItem.find(query)
-            .populate('sellerId', 'name photo')
-            .sort(sortBy === 'price_low' ? { price: 1 } : sortBy === 'price_high' ? { price: -1 } : { createdAt: -1 });
+        let sortOption = { createdAt: -1 };
+        if (sortBy === 'price_low') sortOption = { price: 1 };
+        else if (sortBy === 'price_high') sortOption = { price: -1 };
+        else if (sortBy === 'rating') sortOption = { rating: -1 };
+
+        let items = await MarketplaceItem.find(query).sort(sortOption);
 
         // DYNAMIC AMAZON INJECTION:
-        // If searching or browsing global items, fetch fresh results from Amazon to supplement the database
-        // This ensures the user always sees products even if we haven't imported them yet.
-        if ((!radius || radius === 'Anywhere') && (search || (items.length < 5))) {
-            const amazonKeyword = search || (category && category !== 'All' ? `pet ${category}` : 'pet best sellers');
+        // If the DB has fewer than 5 results for this query, supplement with live Amazon results
+        if (search || items.length < 5) {
+            const amazonKeyword = search
+                || (category && category !== 'All' ? `pet ${category}` : 'pet supplies best sellers');
 
-            console.log(`[MARKETPLACE] Supplementing results with Amazon products for: "${amazonKeyword}"`);
+            console.log(`[MARKETPLACE] Supplementing with Amazon results for: "${amazonKeyword}"`);
             const amazonProducts = await amazonService.searchProducts(amazonKeyword);
 
-            // Map Amazon products to MarketplaceItem format for the frontend
-            const formattedAmazonItems = amazonProducts.map(p => ({
-                _id: `amazon_${p.id}`,
-                title: p.title,
-                description: `Amazon Choice: ${p.title}. Rated ${p.rating} by ${p.reviewsCount} users.`,
-                price: p.price,
-                category: category || 'Other',
-                condition: 'New',
-                images: [p.image],
-                address: 'Amazon Global',
-                isAffiliate: true,
-                affiliateLink: p.link,
-                rating: p.rating,
-                reviewsCount: p.reviewsCount,
-                isExternal: true // Flag to handle differently in UI if needed
-            }));
-
-            // Merge results, avoiding duplicates if possible (by title or ASIN)
-            const existingTitles = new Set(items.map(i => i.title.toLowerCase()));
-            const uniqueAmazonItems = formattedAmazonItems.filter(ai => !existingTitles.has(ai.title.toLowerCase()));
-
-            items = [...items, ...uniqueAmazonItems];
-        }
-
-        // MAGIC SEEDER (Fallback if everything else fails)
-        if (items.length === 0 && !search && (!category || category === 'All')) {
-            console.log('✨ Marketplace empty, seeding featured items...');
-            const featured = [
-                {
-                    title: 'Interactive Dog Puzzle Toy - Level 2',
-                    description: 'Keep your dog engaged and mentally stimulated with this hidden treat puzzle.',
-                    price: 24.99,
-                    category: 'Toys',
-                    condition: 'New',
-                    images: ['https://images.unsplash.com/photo-1541591415600-9820bf58299c?w=500'],
-                    address: 'Amazon Global',
-                    location: { type: 'Point', coordinates: [0, 0] },
-                    isAffiliate: true,
-                    affiliateLink: 'https://amzn.to/example1',
+            // Map Amazon products to the new schema format for the frontend
+            const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
+            const formattedAmazonItems = amazonProducts
+                .filter(p => !existingAsins.has(p.id)) // avoid duplicates
+                .map(p => ({
+                    _id: `amazon_${p.id}`,
+                    asin: p.id,
+                    title: p.title,
+                    description: `Rated ${p.rating}⭐ by ${p.reviewsCount} customers on Amazon.`,
+                    brand: p.brand || '',
+                    price: p.price,
+                    currency: 'USD',
+                    category: category && category !== 'All' ? category : 'Other',
+                    images: [p.image],
+                    affiliateLink: p.link,
+                    rating: p.rating,
+                    reviewsCount: p.reviewsCount,
+                    prime: p.prime || false,
+                    source: 'pa-api',
                     status: 'Available',
-                    sellerId: req.user.id
-                }
-            ];
-            for (const f of featured) {
-                const newItem = await MarketplaceItem.create(f);
-                items.push(newItem);
-            }
+                    views: 0,
+                    isExternal: true // temporary/live result not stored in DB
+                }));
+
+            items = [...items, ...formattedAmazonItems];
         }
 
         res.status(200).json({
@@ -101,17 +81,16 @@ exports.getItems = async (req, res, next) => {
  */
 exports.getItem = async (req, res, next) => {
     try {
+        // External/live Amazon items have no DB record
         if (req.params.id.startsWith('amazon_')) {
-            // This is a virtual Amazon item from the search supplement
             return res.status(200).json({
                 success: true,
                 data: {
                     item: {
                         _id: req.params.id,
-                        isAffiliate: true,
                         isExternal: true,
                         title: 'Amazon Product',
-                        description: 'Please click "Buy on Amazon" to see full details.',
+                        description: 'Click "Buy on Amazon" to see full product details.',
                         price: 0,
                         images: []
                     }
@@ -119,16 +98,16 @@ exports.getItem = async (req, res, next) => {
             });
         }
 
-        const item = await MarketplaceItem.findById(req.params.id)
-            .populate('sellerId', 'name photo email phone');
+        const item = await MarketplaceItem.findById(req.params.id);
 
         if (!item) {
             return res.status(404).json({
                 success: false,
-                message: 'Item not found'
+                message: 'Product not found'
             });
         }
 
+        // Track views
         item.views += 1;
         await item.save();
 
@@ -142,19 +121,19 @@ exports.getItem = async (req, res, next) => {
 };
 
 /**
- * @desc    Create new item
+ * @desc    Manually create/seed a product (Admin use)
  * @route   POST /api/marketplace
- * @access  Private
+ * @access  Private (Admin)
  */
 exports.createItem = async (req, res, next) => {
     try {
-        const itemData = JSON.parse(req.body.data);
-        const images = req.files ? req.files.map(file => file.path) : [];
+        const itemData = req.body.data ? JSON.parse(req.body.data) : req.body;
+        const images = req.files ? req.files.map(file => file.path) : (itemData.images || []);
 
         const item = await MarketplaceItem.create({
             ...itemData,
             images,
-            sellerId: req.user.id
+            source: itemData.source || 'manual',
         });
 
         res.status(201).json({
@@ -167,9 +146,9 @@ exports.createItem = async (req, res, next) => {
 };
 
 /**
- * @desc    Update item
+ * @desc    Update a product (Admin use)
  * @route   PUT /api/marketplace/:id
- * @access  Private
+ * @access  Private (Admin)
  */
 exports.updateItem = async (req, res, next) => {
     try {
@@ -178,14 +157,7 @@ exports.updateItem = async (req, res, next) => {
         if (!item) {
             return res.status(404).json({
                 success: false,
-                message: 'Item not found'
-            });
-        }
-
-        if (item.sellerId.toString() !== req.user.id && req.user.role !== 'admin') {
-            return res.status(401).json({
-                success: false,
-                message: 'Not authorized to update this item'
+                message: 'Product not found'
             });
         }
 
@@ -211,9 +183,9 @@ exports.updateItem = async (req, res, next) => {
 };
 
 /**
- * @desc    Delete item
+ * @desc    Delete a product (Admin use)
  * @route   DELETE /api/marketplace/:id
- * @access  Private
+ * @access  Private (Admin)
  */
 exports.deleteItem = async (req, res, next) => {
     try {
@@ -222,22 +194,15 @@ exports.deleteItem = async (req, res, next) => {
         if (!item) {
             return res.status(404).json({
                 success: false,
-                message: 'Item not found'
+                message: 'Product not found'
             });
         }
 
-        if (item.sellerId.toString() !== req.user.id && req.user.role !== 'admin') {
-            return res.status(401).json({
-                success: false,
-                message: 'Not authorized to delete this item'
-            });
-        }
-
-        await item.remove();
+        await item.deleteOne();
 
         res.status(200).json({
             success: true,
-            message: 'Item removed'
+            message: 'Product removed'
         });
     } catch (error) {
         next(error);
@@ -245,26 +210,7 @@ exports.deleteItem = async (req, res, next) => {
 };
 
 /**
- * @desc    Get current user Listings
- * @route   GET /api/marketplace/my/listings
- * @access  Private
- */
-exports.getMyListings = async (req, res, next) => {
-    try {
-        const items = await MarketplaceItem.find({ sellerId: req.user.id });
-
-        res.status(200).json({
-            success: true,
-            count: items.length,
-            data: { items }
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-/**
- * @desc    Search products on Amazon
+ * @desc    Search products live on Amazon (without saving to DB)
  * @route   GET /api/marketplace/amazon/search
  * @access  Private
  */
@@ -279,6 +225,7 @@ exports.searchAmazonProducts = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
+            count: products.length,
             data: { products }
         });
     } catch (error) {
@@ -287,15 +234,15 @@ exports.searchAmazonProducts = async (req, res, next) => {
 };
 
 /**
- * @desc    Import selected Amazon products
+ * @desc    Import Amazon products into DB (persist them)
  * @route   POST /api/marketplace/amazon/import
- * @access  Private
+ * @access  Private (Admin)
  */
 exports.importSelectedProducts = async (req, res, next) => {
     try {
         const { products } = req.body;
 
-        if (!products || !Array.isArray(products)) {
+        if (!products || !Array.isArray(products) || products.length === 0) {
             return res.status(400).json({
                 success: false,
                 message: 'No products provided for import'
@@ -303,32 +250,46 @@ exports.importSelectedProducts = async (req, res, next) => {
         }
 
         const importedItems = [];
+        const skippedAsins = [];
 
         for (const prod of products) {
+            // Skip if ASIN already exists in DB
+            if (prod.id || prod.asin) {
+                const asin = prod.id || prod.asin;
+                const exists = await MarketplaceItem.findOne({ asin });
+                if (exists) {
+                    skippedAsins.push(asin);
+                    continue;
+                }
+            }
+
             const newItem = await MarketplaceItem.create({
+                asin: prod.id || prod.asin || null,
                 title: prod.title,
-                description: prod.description || `High quality product from Amazon.`,
-                price: prod.price,
+                description: prod.description || `Rated ${prod.rating}⭐ by ${prod.reviewsCount || 0} customers on Amazon.`,
+                brand: prod.brand || '',
+                price: prod.price || 0,
+                currency: 'USD',
                 category: prod.category || 'Other',
-                condition: 'New',
-                images: [prod.image],
-                address: 'Online',
-                location: {
-                    type: 'Point',
-                    coordinates: [0, 0]
-                },
-                sellerId: req.user.id,
-                affiliateLink: prod.link,
-                isAffiliate: true,
-                status: 'Available'
+                images: prod.image ? [prod.image] : (prod.images || []),
+                affiliateLink: prod.link || prod.affiliateLink || '',
+                rating: prod.rating || 0,
+                reviewsCount: prod.reviewsCount || 0,
+                prime: prod.prime || false,
+                source: 'pa-api',
+                status: 'Available',
+                lastSyncedAt: new Date(),
             });
+
             importedItems.push(newItem);
         }
 
         res.status(201).json({
             success: true,
             count: importedItems.length,
-            message: `Successfully imported ${importedItems.length} products.`
+            skipped: skippedAsins.length,
+            message: `Imported ${importedItems.length} product(s). Skipped ${skippedAsins.length} duplicate(s).`,
+            data: { items: importedItems }
         });
     } catch (error) {
         next(error);
