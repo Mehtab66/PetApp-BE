@@ -8,7 +8,9 @@ const {
     expenseOptimizer,
     nutritionAdvice,
     firstAidGuidance,
-    breedCareTips
+    breedCareTips,
+    saveAIInsight,
+    exportAIInsightPDF
 } = require('../controllers/aiController');
 const { protect } = require('../middleware/auth');
 
@@ -26,5 +28,9 @@ router.post('/expense-optimizer', expenseOptimizer);
 router.post('/nutrition-advice', nutritionAdvice);
 router.post('/first-aid', firstAidGuidance);
 router.post('/breed-care', breedCareTips);
+
+// Export Routes
+router.post('/save-insight', saveAIInsight);
+router.get('/export-pdf/:insightId', exportAIInsightPDF);
 
 module.exports = router;

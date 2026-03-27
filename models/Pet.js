@@ -45,7 +45,7 @@ const petSchema = new mongoose.Schema({
     weightUnit: {
         type: String,
         enum: ['kg', 'lbs'],
-        default: 'kg',
+        default: 'lbs',
     },
     photo: {
         type: String,
