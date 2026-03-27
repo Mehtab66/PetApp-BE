@@ -68,10 +68,7 @@ exports.register = async (req, res, next) => {
 
         // Send Email
         try {
-            await Promise.race([
-                emailService.sendOTPEmail(email, otp, name),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
-            ]);
+            await emailService.sendOTPEmail(email, otp, name);
 
             res.status(201).json({
                 success: true,
@@ -229,10 +226,7 @@ exports.resendOtp = async (req, res, next) => {
 
         // Send Email
         try {
-            await Promise.race([
-                emailService.sendOTPEmail(email, otp, pendingUser.name),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
-            ]);
+            await emailService.sendOTPEmail(email, otp, pendingUser.name);
 
             res.status(200).json({
                 success: true,
@@ -401,10 +395,7 @@ exports.forgotPassword = async (req, res, next) => {
 
         // Send Reset Email
         try {
-            await Promise.race([
-                emailService.sendResetPasswordEmail(email, otp, user.name),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Email timeout')), 10000))
-            ]);
+            await emailService.sendResetPasswordEmail(email, otp, user.name);
 
             res.status(200).json({
                 success: true,
