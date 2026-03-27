@@ -1,23 +1,16 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const config = require('../config/config');
 
 /**
  * Email Service
- * Handles sending emails using nodemailer
+ * Handles sending emails using Resend API
  */
 
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
-    // Standard property to force IPv4
-    family: 4,
-    tls: {
-        rejectUnauthorized: false
-    }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Use onboarding@resend.dev as default sender if no verified domain exists
+const SENDER_EMAIL = 'onboarding@resend.dev';
+const SENDER_NAME = 'PetVitals Support';
 
 /**
  * Generate OTP Email Template
@@ -184,22 +177,26 @@ const getResetPasswordTemplate = (otp, userName) => {
  */
 exports.sendOTPEmail = async (email, otp, userName) => {
     try {
-        const mailOptions = {
-            from: `"PetVitals Support" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: 'Verify Your Account - PetVitals',
-            html: getOTPTemplate(otp, userName),
-        };
-
-        if (process.env.NODE_ENV === 'development' && !process.env.EMAIL_USER) {
+        if (process.env.NODE_ENV === 'development' && !process.env.RESEND_API_KEY) {
             console.log('-----------------------------------------');
             console.log(`DEV MODE: OTP for ${email} is: ${otp}`);
             console.log('-----------------------------------------');
             return true;
         }
 
-        const info = await transporter.sendMail(mailOptions);
-        console.log('Message sent: %s', info.messageId);
+        const { data, error } = await resend.emails.send({
+            from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
+            to: [email],
+            subject: 'Verify Your Account - PetVitals',
+            html: getOTPTemplate(otp, userName),
+        });
+
+        if (error) {
+            console.error('Resend error:', error);
+            return false;
+        }
+
+        console.log('Message sent:', data.id);
         return true;
     } catch (error) {
         console.error('Error sending email:', error);
@@ -215,21 +212,25 @@ exports.sendOTPEmail = async (email, otp, userName) => {
  */
 exports.sendResetPasswordEmail = async (email, otp, userName) => {
     try {
-        const mailOptions = {
-            from: `"PetVitals Support" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: 'Reset Your Password - PetVitals',
-            html: getResetPasswordTemplate(otp, userName),
-        };
-
-        if (process.env.NODE_ENV === 'development' && !process.env.EMAIL_USER) {
+        if (process.env.NODE_ENV === 'development' && !process.env.RESEND_API_KEY) {
             console.log('-----------------------------------------');
             console.log(`DEV MODE: RESET OTP for ${email} is: ${otp}`);
             console.log('-----------------------------------------');
             return true;
         }
 
-        const info = await transporter.sendMail(mailOptions);
+        const { data, error } = await resend.emails.send({
+            from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
+            to: [email],
+            subject: 'Reset Your Password - PetVitals',
+            html: getResetPasswordTemplate(otp, userName),
+        });
+
+        if (error) {
+            console.error('Resend reset error:', error);
+            return false;
+        }
+
         return true;
     } catch (error) {
         console.error('Error sending reset email:', error);
