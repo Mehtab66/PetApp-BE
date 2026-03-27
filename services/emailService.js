@@ -8,6 +8,10 @@ const config = require('../config/config');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+if (!process.env.RESEND_API_KEY) {
+    console.error('CRITICAL: RESEND_API_KEY is not defined in environment variables!');
+}
+
 // Use onboarding@resend.dev as default sender if no verified domain exists
 const SENDER_EMAIL = 'onboarding@resend.dev';
 const SENDER_NAME = 'PetVitals Support';
@@ -192,11 +196,11 @@ exports.sendOTPEmail = async (email, otp, userName) => {
         });
 
         if (error) {
-            console.error('Resend error:', error);
+            console.error('Resend API Error (OTP):', JSON.stringify(error, null, 2));
             return false;
         }
 
-        console.log('Message sent:', data.id);
+        console.log('OTP Email sent successfully via Resend. ID:', data.id);
         return true;
     } catch (error) {
         console.error('Error sending email:', error);
@@ -227,9 +231,11 @@ exports.sendResetPasswordEmail = async (email, otp, userName) => {
         });
 
         if (error) {
-            console.error('Resend reset error:', error);
+            console.error('Resend API Error (Reset):', JSON.stringify(error, null, 2));
             return false;
         }
+
+        console.log('Reset Email sent successfully via Resend. ID:', data.id);
 
         return true;
     } catch (error) {
