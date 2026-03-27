@@ -1,20 +1,32 @@
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const config = require('../config/config');
 
 /**
  * Email Service
- * Handles sending emails using Resend API
+ * Handles sending emails using nodemailer
  */
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+    },
+    // Standard property to force IPv4
+    family: 4,
+    tls: {
+        rejectUnauthorized: false
+    }
+});
 
-if (!process.env.RESEND_API_KEY) {
-    console.error('CRITICAL: RESEND_API_KEY is not defined in environment variables!');
-}
-
-// Use onboarding@resend.dev as default sender if no verified domain exists
-const SENDER_EMAIL = 'onboarding@resend.dev';
-const SENDER_NAME = 'PetVitals Support';
+// Verify transporter on startup
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('SMTP Connection Error:', error);
+    } else {
+        console.log('SMTP Server is ready to take our messages');
+    }
+});
 
 /**
  * Generate OTP Email Template
@@ -181,29 +193,29 @@ const getResetPasswordTemplate = (otp, userName) => {
  */
 exports.sendOTPEmail = async (email, otp, userName) => {
     try {
-        if (process.env.NODE_ENV === 'development' && !process.env.RESEND_API_KEY) {
+        const mailOptions = {
+            from: `"PetVitals Support" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Verify Your Account - PetVitals',
+            html: getOTPTemplate(otp, userName),
+        };
+
+        if (process.env.NODE_ENV === 'development' && !process.env.EMAIL_USER) {
             console.log('-----------------------------------------');
             console.log(`DEV MODE: OTP for ${email} is: ${otp}`);
             console.log('-----------------------------------------');
             return true;
         }
 
-        const { data, error } = await resend.emails.send({
-            from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
-            to: [email],
-            subject: 'Verify Your Account - PetVitals',
-            html: getOTPTemplate(otp, userName),
-        });
-
-        if (error) {
-            console.error('Resend API Error (OTP):', JSON.stringify(error, null, 2));
-            return false;
-        }
-
-        console.log('OTP Email sent successfully via Resend. ID:', data.id);
+        console.log(`Attempting to send OTP email to: ${email}...`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('OTP Email sent successfully! Message ID:', info.messageId);
         return true;
     } catch (error) {
-        console.error('Error sending email:', error);
+        console.error('FAILED to send OTP email:', error);
+        if (error.code === 'EAUTH') {
+            console.error('AUTHENTICATION FAILURE: Please check EMAIL_USER and EMAIL_PASS (App Password).');
+        }
         return false;
     }
 };
@@ -216,30 +228,26 @@ exports.sendOTPEmail = async (email, otp, userName) => {
  */
 exports.sendResetPasswordEmail = async (email, otp, userName) => {
     try {
-        if (process.env.NODE_ENV === 'development' && !process.env.RESEND_API_KEY) {
+        const mailOptions = {
+            from: `"PetVitals Support" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Reset Your Password - PetVitals',
+            html: getResetPasswordTemplate(otp, userName),
+        };
+
+        if (process.env.NODE_ENV === 'development' && !process.env.EMAIL_USER) {
             console.log('-----------------------------------------');
             console.log(`DEV MODE: RESET OTP for ${email} is: ${otp}`);
             console.log('-----------------------------------------');
             return true;
         }
 
-        const { data, error } = await resend.emails.send({
-            from: `${SENDER_NAME} <${SENDER_EMAIL}>`,
-            to: [email],
-            subject: 'Reset Your Password - PetVitals',
-            html: getResetPasswordTemplate(otp, userName),
-        });
-
-        if (error) {
-            console.error('Resend API Error (Reset):', JSON.stringify(error, null, 2));
-            return false;
-        }
-
-        console.log('Reset Email sent successfully via Resend. ID:', data.id);
-
+        console.log(`Attempting to send Reset email to: ${email}...`);
+        const info = await transporter.sendMail(mailOptions);
+        console.log('Reset Email sent successfully! Message ID:', info.messageId);
         return true;
     } catch (error) {
-        console.error('Error sending reset email:', error);
+        console.error('FAILED to send reset email:', error);
         return false;
     }
 };
