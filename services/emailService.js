@@ -19,14 +19,22 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// Verify transporter on startup
+// Verify transporter on startup with detailed logging
+console.log('--- EMAIL SERVICE INITIALIZATION ---');
+console.log('EMAIL_USER defined:', !!process.env.EMAIL_USER);
+console.log('EMAIL_PASS defined:', !!process.env.EMAIL_PASS);
+if (process.env.EMAIL_USER) {
+    console.log('Using EMAIL_USER:', process.env.EMAIL_USER.substring(0, 3) + '...' + process.env.EMAIL_USER.split('@')[1]);
+}
+
 transporter.verify((error, success) => {
     if (error) {
-        console.error('SMTP Connection Error:', error);
+        console.error('CRITICAL: SMTP Connection Error during startup:', error);
     } else {
-        console.log('SMTP Server is ready to take our messages');
+        console.log('SUCCESS: SMTP Server is ready to take our messages');
     }
 });
+console.log('-------------------------------------');
 
 /**
  * Generate OTP Email Template
@@ -207,14 +215,22 @@ exports.sendOTPEmail = async (email, otp, userName) => {
             return true;
         }
 
-        console.log(`Attempting to send OTP email to: ${email}...`);
+        console.log(`[EMAIL_DEBUG] Attempting to send OTP email to: ${email}`);
+        console.log(`[EMAIL_DEBUG] From: "PetVitals Support" <${process.env.EMAIL_USER}>`);
+        
         const info = await transporter.sendMail(mailOptions);
-        console.log('OTP Email sent successfully! Message ID:', info.messageId);
+        
+        console.log('[EMAIL_SUCCESS] OTP Email sent successfully!');
+        console.log('[EMAIL_SUCCESS] Message ID:', info.messageId);
+        console.log('[EMAIL_SUCCESS] Response:', info.response);
         return true;
     } catch (error) {
-        console.error('FAILED to send OTP email:', error);
+        console.error('[EMAIL_ERROR] FAILED to send OTP email to:', email);
+        console.error('[EMAIL_ERROR] Full Error Object:', JSON.stringify(error, null, 2));
+        console.error('[EMAIL_ERROR] Error Message:', error.message);
+        
         if (error.code === 'EAUTH') {
-            console.error('AUTHENTICATION FAILURE: Please check EMAIL_USER and EMAIL_PASS (App Password).');
+            console.error('[EMAIL_ERROR] AUTHENTICATION FAILURE: The EMAIL_USER or EMAIL_PASS (App Password) is incorrect.');
         }
         return false;
     }
@@ -242,12 +258,13 @@ exports.sendResetPasswordEmail = async (email, otp, userName) => {
             return true;
         }
 
-        console.log(`Attempting to send Reset email to: ${email}...`);
+        console.log(`[EMAIL_DEBUG] Attempting to send Reset email to: ${email}`);
         const info = await transporter.sendMail(mailOptions);
-        console.log('Reset Email sent successfully! Message ID:', info.messageId);
+        console.log('[EMAIL_SUCCESS] Reset Email sent successfully! ID:', info.messageId);
         return true;
     } catch (error) {
-        console.error('FAILED to send reset email:', error);
+        console.error('[EMAIL_ERROR] FAILED to send reset email to:', email);
+        console.error('[EMAIL_ERROR] Full Error Object:', JSON.stringify(error, null, 2));
         return false;
     }
 };
