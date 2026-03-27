@@ -9,8 +9,8 @@ const config = require('../config/config');
 
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 587,
-    secure: false, // true for 465, false for other ports (like 587)
+    port: 465,
+    secure: true, // true for 465 (Implicit TLS)
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -22,9 +22,9 @@ const transporter = nodemailer.createTransport({
     },
     family: 4,
     // Add timeouts to prevent hanging the entire request if SMTP is slow
-    connectionTimeout: 15000, // 15 seconds
-    greetingTimeout: 15000,   // 15 seconds
-    socketTimeout: 20000,     // 20 seconds
+    connectionTimeout: 25000, // 25 seconds
+    greetingTimeout: 20000,   // 20 seconds
+    socketTimeout: 30000,     // 30 seconds
     tls: {
         rejectUnauthorized: false
     }
