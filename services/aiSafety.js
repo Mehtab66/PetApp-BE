@@ -74,8 +74,12 @@ function validateAndSanitizeAIResponse(rawResponse, userMessage = '', contextTyp
 
     let sanitized = rawResponse;
 
-    // Remove markdown asterisks / bolding for clean formatting consistency
-    sanitized = sanitized.replace(/\*\*/g, '').replace(/\*/g, '');
+    // Remove markdown asterisks, hashes (#), and bolding for clean formatting consistency
+    sanitized = sanitized
+        .replace(/^#+\s*/gm, '')
+        .replace(/#+/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '');
 
     // Check direct medication safety first if user asked
     const directMedCheck = checkDirectMedicationSafety(userMessage);

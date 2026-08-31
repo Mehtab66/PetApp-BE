@@ -291,18 +291,19 @@ DURATION: ${duration || 'Not specified'}
 
 ${SYSTEM_SAFETY_INSTRUCTION}
 
-PROVIDE:
+PROVIDE THESE CLEAR NUMBERED SECTIONS WITH UPPERCASE HEADERS (Each on a new line):
 1. URGENCY LEVEL: Explicitly classify as one of:
    - MONITOR (Mild symptoms suitable for close home monitoring)
    - CONTACT A VETERINARIAN (Non-emergency concern that requires professional veterinary evaluation)
    - URGENT VETERINARY ATTENTION (Potentially serious condition requiring immediate veterinary or ER care)
-2. POSSIBLE ASSOCIATIONS: List 2-3 conditions that can be associated with these symptoms.
+2. POSSIBLE NON-EMERGENCY CAUSES & ASSOCIATIONS: List 2-3 common conditions or benign reasons associated with these symptoms. State clearly that these are educational possibilities for discussion with a vet.
    IMPORTANT: Never provide a definitive diagnosis or say "Your pet has X". Always use phrasing like: "These symptoms can be associated with several conditions. A licensed veterinarian can evaluate your pet in person to determine the underlying cause."
-3. IMMEDIATE ACTIONS: Safe, practical supportive steps the owner can take right now.
-4. VETERINARY CONSULTATION: When to see a vet and what questions to ask.
-5. HOME MONITORING: What changes or vital signs to watch closely.
+3. FIRST AID & IMMEDIATE ACTIONS: Safe, practical supportive steps the owner can take right now.
+4. WHAT NOT TO DO: Critical mistakes and unsafe practices to avoid (e.g. do not give human medications like ibuprofen, do not force feed, do not ignore worsening signs).
+5. HOME MONITORING & WARNING SIGNS: What changes or vital signs to watch closely.
+6. VETERINARY CONSULTATION: When to see a vet and what questions to ask.
 
-FORMATTING: No asterisks, use bullet points (•), be clear, empathetic, and calming.`;
+FORMATTING: No asterisks, use bullet points (•), keep headers on separate lines, be clear, empathetic, and calming.`;
 
         const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
@@ -373,15 +374,15 @@ ${behaviorIssue}
 
 ${SYSTEM_SAFETY_INSTRUCTION}
 
-PROVIDE A COMPREHENSIVE POSITIVE TRAINING GUIDE:
-1. BEHAVIOR OBSERVATION: Potential triggers or patterns based on age and breed tendencies.
+PROVIDE THESE CLEAR NUMBERED SECTIONS WITH UPPERCASE HEADERS (Each on a new line):
+1. BEHAVIOR OBSERVATION & TRIGGERS: Potential triggers or patterns based on age and breed tendencies.
    IMPORTANT: Do not make definitive medical or psychiatric diagnoses (e.g. do not say "Your dog has anxiety"). Use phrasing like: "This behavior can sometimes be associated with stress or anxiety, but a veterinarian or qualified behavior professional can evaluate the underlying cause."
 2. 7-DAY POSITIVE TRAINING PLAN: Day-by-day positive reinforcement drills with clear, gentle steps.
-3. DO's and DON'Ts: Key training mistakes to avoid.
+3. WHAT NOT TO DO: Key training mistakes and punitive methods to avoid.
 4. PROGRESS MARKERS: Positive signs that indicate improvement.
 5. WHEN TO SEEK PROFESSIONAL HELP: When to consult a certified trainer, veterinary behaviorist, or vet to rule out underlying pain/medical causes.
 
-FORMATTING: No asterisks, use bullet points (•), be encouraging, practical, and specific.`;
+FORMATTING: No asterisks, keep headers on separate lines, use bullet points (•), be encouraging, practical, and specific.`;
 
         const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
@@ -512,14 +513,14 @@ HEALTH GOALS: ${healthGoals || 'General wellness and maintenance'}
 
 ${SYSTEM_SAFETY_INSTRUCTION}
 
-PROVIDE:
+PROVIDE THESE CLEAR NUMBERED SECTIONS WITH UPPERCASE HEADERS (Each on a new line):
 1. GENERAL NUTRITIONAL OVERVIEW: Key nutritional requirements for this life stage and breed.
 2. DIETARY CONSIDERATIONS: Wholesome ingredients, macronutrient balance, and food categories (e.g. high-protein, age-appropriate formulas).
 3. FEEDING ROUTINE: General portion sizing and daily feeding frequency recommendations.
 4. FOODS TO AVOID: Toxic and unsafe ingredients for this species (e.g. chocolate, onions, grapes, xylitol).
 5. VETERINARY ADVICE: Explicitly state that for pets with known medical conditions or before making significant dietary transitions, the owner should discuss changes with their veterinarian.
 
-FORMATTING: No asterisks, use bullet points (•), be informative and professional.`;
+FORMATTING: No asterisks, keep headers on separate lines, use bullet points (•), be informative and professional.`;
 
         const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
@@ -570,17 +571,22 @@ ITEM INVOLVED (if any): ${itemInvolved || 'None'}
 
 ${SYSTEM_SAFETY_INSTRUCTION}
 
-GUIDELINES:
-1. EMERGENCY VETERINARY PRIORITIZATION: If this is an acute or potentially serious situation, prominently instruct:
+PROVIDE THESE CLEAR NUMBERED SECTIONS WITH UPPERCASE HEADERS (Each on a new line):
+1. EMERGENCY GUIDANCE & RECOMMENDATIONS: If this is an acute or potentially serious situation, prominently instruct:
    - "Contact an emergency veterinarian immediately."
    - "Find the nearest open veterinary hospital or animal poison control hotline."
-2. STABILIZATION & SAFETY:
-   - Provide safe, non-invasive first aid steps to keep the pet calm and safe while arranging emergency veterinary care.
-   - List critical WHAT NOT TO DO actions (e.g. do not induce vomiting unless explicitly directed by a veterinarian or poison helpline, do not give human medication).
-3. TOXICITY WARNING: If a toxic substance is involved, identify common risks and symptoms to watch for.
-4. LIMITATIONS: Clearly state that first aid is only for temporary stabilization and is never a substitute for hands-on emergency veterinary treatment. Never claim home treatment is definitely safe.
+2. FIRST AID & STABILIZATION:
+   - Provide safe, non-invasive first aid steps to keep the pet calm, safe, and airway clear while arranging emergency veterinary care.
+3. WHAT NOT TO DO:
+   - List critical mistakes and actions to avoid (e.g. do not induce vomiting unless explicitly directed by a veterinarian or poison helpline, do not give human medication like paracetamol or ibuprofen).
+4. POSSIBLE NON-EMERGENCY CAUSES:
+   - Outline possible non-emergency explanations or benign reasons if symptoms are mild.
+5. TOXICITY WARNING & SIGNS:
+   - If a toxic substance, venom, or chemical is involved, identify common risks and red flag symptoms to watch for.
+6. LIMITATIONS & NEXT STEPS:
+   - Clearly state that first aid is only for temporary stabilization and is never a substitute for hands-on emergency veterinary treatment.
 
-FORMATTING: Use clear uppercase headers (without asterisks), use bullet points (•), be calm, clear, and prioritize emergency vet contact.`;
+FORMATTING: Use clear uppercase headers (without asterisks), keep headers on separate lines, use bullet points (•), be calm, clear, and prioritize emergency vet contact.`;
 
         const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
@@ -633,16 +639,16 @@ AGE: ${pet.calculatedAge || pet.age || 'Unknown'} years
 
 ${SYSTEM_SAFETY_INSTRUCTION}
 
-PROVIDE:
-1. BREED CHARACTERISTICS: General personality, energy levels, and temperament tendencies.
+PROVIDE THESE CLEAR NUMBERED SECTIONS WITH UPPERCASE HEADERS (Each on a new line):
+1. BREED CHARACTERISTICS & TEMPERAMENT: General personality, energy levels, and temperament tendencies.
 2. GROOMING & COAT CARE: Coat brushing, bathing frequency, and ear/nail hygiene tips.
 3. EXERCISE & ACTIVITY: Daily activity needs and recommended play styles.
-4. HEALTH CONSIDERATIONS (PROBABILISTIC):
+4. HEALTH PREDISPOSITIONS & WARNING SIGNS:
    IMPORTANT: Use probabilistic wording: "Some pets of this breed may be more prone to..." instead of "This breed will develop...". Do not make guaranteed health claims or diagnoses.
 5. POSITIVE TRAINING TIPS: Recommended motivational strategies for this breed type.
 6. LIFE STAGE WELLNESS: General care advice for their current age stage (${pet.calculatedAge || pet.age} years).
 
-FORMATTING: No asterisks, use bullet points (•), be informative and breed-specific.`;
+FORMATTING: No asterisks, keep headers on separate lines, use bullet points (•), be informative and breed-specific.`;
 
         const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
