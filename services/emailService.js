@@ -12,8 +12,8 @@ const transporter = nodemailer.createTransport({
     port: 465,
     secure: true, // true for 465 (Implicit TLS)
     auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: (process.env.EMAIL_USER || '').trim(),
+        pass: (process.env.EMAIL_PASS || '').replace(/\s+/g, '').trim(),
     },
     // FORCE IPv4 to avoid ENETUNREACH errors on cloud platforms like Render
     // We use a custom lookup function to ensure we only get IPv4 addresses

@@ -8,26 +8,46 @@ const axios = require('axios');
  * Handles pet profile CRUD operations
  */
 
+// Fallback breeds in case AI is unavailable
+const DEFAULT_BREEDS = {
+    Dog: ['Labrador Retriever', 'German Shepherd', 'Golden Retriever', 'French Bulldog', 'Bulldog', 'Poodle', 'Beagle', 'Rottweiler', 'German Shorthaired Pointer', 'Yorkshire Terrier', 'Boxer', 'Dachshund', 'Siberian Husky', 'Great Dane', 'Doberman Pinscher', 'Australian Shepherd', 'Miniature Schnauzer', 'Cavalier King Charles Spaniel', 'Shih Tzu', 'Boston Terrier', 'Bernese Mountain Dog', 'Pomeranian', 'Havanese', 'English Springer Spaniel', 'Brittany', 'Pug', 'Cocker Spaniel', 'Border Collie', 'Mastiff', 'Chihuahua'],
+    Cat: ['Persian', 'Maine Coon', 'Ragdoll', 'British Shorthair', 'Siamese', 'American Shorthair', 'Sphynx', 'Abyssinian', 'Scottish Fold', 'Bengal', 'Devon Rex', 'Birman', 'Oriental Shorthair', 'Norwegian Forest Cat', 'Russian Blue', 'Cornish Rex', 'Burmese', 'Siberian', 'Tonkinese', 'Bombay'],
+    Bird: ['Budgerigar (Parakeet)', 'Cockatiel', 'Lovebird', 'Canary', 'Finch', 'African Grey Parrot', 'Amazon Parrot', 'Cockatoo', 'Macaw', 'Conure', 'Pionus Parrot', 'Quaker Parrot', 'Caique', 'Senegal Parrot'],
+    Rabbit: ['Holland Lop', 'Netherland Dwarf', 'Mini Rex', 'Lionhead', 'Flemish Giant', 'Dutch', 'English Angora', 'Mini Lop', 'Rex', 'Californian', 'Harlequin', 'Havana'],
+    Fish: ['Betta', 'Goldfish', 'Guppy', 'Neon Tetra', 'Angelfish', 'Molly', 'Platy', 'Swordtail', 'Zebra Danio', 'Corydoras Catfish', 'Discus', 'Cichlid', 'Cherry Barb', 'Harlequin Rasbora'],
+    Other: ['Hamster', 'Guinea Pig', 'Ferret', 'Bearded Dragon', 'Gecko', 'Turtle', 'Chinchilla', 'Hedgehog']
+};
+
 /**
- * @desc    Get breeds for a pet type using AI (Grok)
+ * @desc    Get breeds for a pet type using AI
  * @route   GET /api/pets/breeds/:type
  * @access  Private
  */
 exports.getBreedsByType = async (req, res, next) => {
+    const { type } = req.params;
+
+    if (!type) {
+        return res.status(400).json({
+            success: false,
+            message: 'Pet type is required',
+        });
+    }
+
+    const fallback = DEFAULT_BREEDS[type] || DEFAULT_BREEDS['Dog'];
+    const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
+
+    if (!apiKey) {
+        return res.status(200).json({
+            success: true,
+            data: { breeds: fallback },
+        });
+    }
+
     try {
-        const { type } = req.params;
-
-        if (!type) {
-            return res.status(400).json({
-                success: false,
-                message: 'Pet type is required',
-            });
-        }
-
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.1-8b-instant',
+                model: 'openai/gpt-oss-120b',
                 messages: [
                     {
                         role: 'system',
@@ -42,20 +62,21 @@ exports.getBreedsByType = async (req, res, next) => {
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 10000
             }
         );
 
-        const breedsContent = response.data.choices[0].message.content;
+        const breedsContent = response.data.choices[0]?.message?.content || '';
         const breeds = breedsContent.split(',')
             .map(breed => breed.trim())
             .filter(breed => breed.length > 0);
 
         res.status(200).json({
             success: true,
-            data: { breeds },
+            data: { breeds: breeds.length > 0 ? breeds : fallback },
         });
     } catch (error) {
         if (error.response) {
@@ -64,10 +85,10 @@ exports.getBreedsByType = async (req, res, next) => {
             console.error('Groq API Error:', error.message);
         }
 
-        res.status(error.response?.status || 500).json({
-            success: false,
-            message: 'Failed to fetch breeds from AI',
-            error: error.message
+        // Return standard fallback list so the user is never blocked
+        res.status(200).json({
+            success: true,
+            data: { breeds: fallback },
         });
     }
 };

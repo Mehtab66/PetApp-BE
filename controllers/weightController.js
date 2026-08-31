@@ -109,25 +109,26 @@ exports.analyzeWeightTrend = async (req, res, next) => {
         const genderInfo = pet.gender && pet.gender !== 'Unknown' ? `, ${pet.gender}` : '';
         const weightHistory = logs.map(l => `${l.weight} ${l.unit} on ${l.date.toISOString().split('T')[0]}`).join(', ');
 
-        const prompt = `You are an expert veterinary assistant AI.
+        const prompt = `You are a supportive AI Pet Care Assistant.
         The pet's name is ${pet.name}, a ${ageDetails}${genderInfo} ${breedInfo}${pet.type}. ${currentWeight}
         Weight history (chronological): ${weightHistory}.
 
         Tasks:
-        1. Comment on whether the weight trend (gaining, losing, stable) looks healthy for ${pet.name}'s age, breed, and size.
-        2. Note whether the current weight appears to be in a healthy range for a ${breedInfo}${pet.type} of this age.
-        3. Give one brief, practical tip if relevant.
+        1. Comment on whether the weight trend (gaining, losing, stable) looks consistent for ${pet.name}'s age, breed, and size.
+        2. Note whether the current weight appears to be in an expected general range for a ${breedInfo}${pet.type} of this age.
+        3. Give one brief, practical educational wellness tip if relevant.
 
-        Write 2-3 sentences addressed to the owner, mentioning ${pet.name} by name. Be warm, encouraging, and concise. Do NOT diagnose medical conditions. Do NOT use markdown.`;
+        Write 2-3 sentences addressed to the owner, mentioning ${pet.name} by name. Be warm, encouraging, and concise. Do NOT diagnose medical conditions. Do NOT recommend or calculate medication. Do NOT use markdown.`;
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.1-8b-instant',
+                model: 'openai/gpt-oss-120b',
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a supportive and knowledgeable veterinary AI assistant.'
+                        content: 'You are a supportive and knowledgeable AI Pet Care Assistant. You provide general educational wellness observations and never diagnose diseases or prescribe medications.'
                     },
                     {
                         role: 'user',
@@ -139,7 +140,7 @@ exports.analyzeWeightTrend = async (req, res, next) => {
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }

@@ -31,10 +31,11 @@ exports.getPetActivities = async (req, res, next) => {
         
         Do not include any markdown formatting (like \`\`\`json), just the raw JSON string.`;
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.1-8b-instant',
+                model: 'openai/gpt-oss-120b',
                 messages: [
                     {
                         role: 'system',
@@ -49,7 +50,7 @@ exports.getPetActivities = async (req, res, next) => {
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }

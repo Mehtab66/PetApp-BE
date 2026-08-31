@@ -4,10 +4,16 @@ const HealthRecord = require('../models/HealthRecord');
 const Roadmap = require('../models/Roadmap');
 const AIInsight = require('../models/AIInsight');
 const PDFDocument = require('pdfkit');
+const {
+    SYSTEM_SAFETY_INSTRUCTION,
+    MEDICAL_DISCLAIMER_TEXT,
+    checkDirectMedicationSafety,
+    validateAndSanitizeAIResponse
+} = require('../services/aiSafety');
 
 /**
  * AI Controller
- * Handles generic chat, AI Doctor, and Pet Roadmap features
+ * Handles generic chat, personalized pet health guidance, symptom triage, emergency guidance, and roadmaps
  */
 
 /**
@@ -26,30 +32,39 @@ exports.getChatResponse = async (req, res, next) => {
             });
         }
 
+        // Fast-path guardrail check for direct medication queries
+        const directMedSafeResponse = checkDirectMedicationSafety(message);
+        if (directMedSafeResponse) {
+            return res.status(200).json({
+                success: true,
+                data: { message: directMedSafeResponse },
+            });
+        }
+
         let systemPrompt = '';
 
         if (isDoctorMode) {
-            // High-context Doctor Mode
-            let petContext = 'You are AI Dr. Pet, a specialized veterinary AI who has access to the user\'s specific pet data.';
+            // High-context Pet Profile Mode
+            let petContext = "You are the PetVitals AI Pet Care Assistant with access to the user's specific pet data for educational guidance.";
 
             if (petId) {
                 const pet = await Pet.findOne({ _id: petId, userId: req.user.id });
                 if (pet) {
-                    petContext += `\n\nPATIENT PROFILE:
+                    petContext += `\n\nPET PROFILE:
 - Name: ${pet.name}
 - Species: ${pet.type}
 - Breed: ${pet.breed || 'Unknown'}
 - Age: ${pet.calculatedAge || pet.age || 'Unknown'} years
-- Weight: ${pet.weight || 'Unknown'} ${pet.weightUnit}
-- Health Notes: ${pet.notes || 'None'}`;
+- Weight: ${pet.weight || 'Unknown'} ${pet.weightUnit || 'kg'}
+- Notes: ${pet.notes || 'None'}`;
 
                     const healthRecords = await HealthRecord.find({ petId }).sort({ date: -1 }).limit(5);
                     if (healthRecords.length > 0) {
-                        petContext += `\n\nRECENT MEDICAL HISTORY:`;
+                        petContext += `\n\nRECENT MEDICAL HISTORY (from records):`;
                         healthRecords.forEach(record => {
                             petContext += `\n- ${new Date(record.date).toLocaleDateString()}: ${record.title} (${record.type})`;
-                            if (record.diagnosis) petContext += ` | Dx: ${record.diagnosis}`;
-                            if (record.treatment) petContext += ` | Tx: ${record.treatment}`;
+                            if (record.diagnosis) petContext += ` | Recorded Dx: ${record.diagnosis}`;
+                            if (record.treatment) petContext += ` | Recorded Tx: ${record.treatment}`;
                         });
                     }
                 }
@@ -57,21 +72,22 @@ exports.getChatResponse = async (req, res, next) => {
                 const pets = await Pet.find({ userId: req.user.id, isActive: true });
                 if (pets.length > 0) {
                     petContext += `\n\nUSER'S PETS: ${pets.map(p => `${p.name} (${p.type})`).join(', ')}`;
-                    petContext += `\n\nAsk the user which pet they are inquiring about to provide specific medical advice.`;
+                    petContext += `\n\nAsk the user which pet they are inquiring about to provide relevant guidance.`;
                 }
             }
 
             systemPrompt = `${petContext}
 
-GOAL: Provide clinical-grade (but safe) veterinary advice. Analyze records if provided.
-IMPORTANT: You are a VETERINARY AI. If the user asks about topics unrelated to pets, animals, or veterinary medicine (e.g., cars, politics, coding, general life advice), kindly refuse and ask them to provide a pet-related prompt.
-CLEAN FORMATTING: No asterisks, use bullet points (•), be professional and precise.`;
+${SYSTEM_SAFETY_INSTRUCTION}
+
+GOAL: Provide supportive, educational pet health guidance. Clearly distinguish between mild situations and potential emergencies.
+CLEAN FORMATTING: No asterisks, use bullet points (•), be professional, compassionate, and precise.`;
 
         } else {
             // Generic AI Mode
-            systemPrompt = `You are a helpful Pet Care Assistant. Use a friendly tone. 
-Provide general advice about pets. If a situation sounds urgent, suggest a vet.
-IMPORTANT: You are specific to PET CARE. If the user asks about non-pet topics (e.g., cars, politics, coding, general life advice), kindly refuse and ask them to provide a pet-related prompt.
+            systemPrompt = `You are a helpful AI Pet Care Assistant provided by PetVitals. Use a friendly and supportive tone.
+${SYSTEM_SAFETY_INSTRUCTION}
+Provide general educational advice about pets. If a situation sounds potentially urgent or serious, immediately instruct the user to contact an emergency veterinarian.
 CLEAN FORMATTING: No asterisks, use bullet points (•), use clear paragraphs.`;
         }
 
@@ -90,28 +106,29 @@ CLEAN FORMATTING: No asterisks, use bullet points (•), use clear paragraphs.`;
 
         messages.push({ role: 'user', content: message });
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: messages,
-                temperature: 0.7,
+                temperature: 0.6,
                 max_tokens: 1024,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let aiMessage = response.data.choices[0].message.content;
-        aiMessage = aiMessage.replace(/\*\*/g, '').replace(/\*/g, '');
+        aiMessage = validateAndSanitizeAIResponse(aiMessage, message, 'chat');
 
         res.status(200).json({
             success: true,
-            data: { message: aiMessage.trim() },
+            data: { message: aiMessage },
         });
     } catch (error) {
         console.error('AI Chat Error:', error.response?.data || error.message);
@@ -163,47 +180,49 @@ Old Plan Summary: ${existingRoadmap.content.substring(0, 300)}...
 Please provide an updated plan that builds upon the previous progress or adjusts based on the ${daysSinceOld} days passed.`;
         }
 
-        const prompt = `You are an expert Veterinary Strategist & Pet Nutritionist.
-Generate a high-proficiency, structured 30-day Health & Meal Roadmap for this pet:
+        const prompt = `You are an AI Pet Wellness & Nutrition Specialist.
+Generate a high-proficiency, structured 30-day Health & Wellness Roadmap for this pet:
 NAME: ${pet.name}
 SPECIES: ${pet.type}
 BREED: ${pet.breed || 'Unknown'}
 AGE: ${pet.calculatedAge || pet.age || 'Unknown'} years
-WEIGHT: ${pet.weight} ${pet.weightUnit}
+WEIGHT: ${pet.weight} ${pet.weightUnit || 'kg'}
 HISTORY: ${healthRecords.map(r => r.title).join(', ')}${previousContext}
 
+${SYSTEM_SAFETY_INSTRUCTION}
+
 THE ROADMAP MUST INCLUDE:
-1. Vitality Score (1-100): An assessment of current health based on data.
-2. Top 3 Health Priorities: Specific clinical or behavioral areas to focus on.
-3. Week-by-Week Action Plan: 4 weeks of specific health goals.
-4. AI Meal Plan (High Precision): Daily calories, ingredients recommendation, and a "Meal Schedule" based on ${pet.type} requirements.
-5. Exercise & Mental Stimulation: Specific routine (walks, play, training) for this breed.
-6. Symptom Watchlist: What specific red flags to look for based on this pet's breed and age.
+1. Wellness Score (1-100): An estimate of overall wellness based on available owner records.
+2. Top 3 Wellness Priorities: Specific daily care or enrichment areas to focus on.
+3. Week-by-Week Action Plan: 4 weeks of specific, safe wellness goals.
+4. AI Meal & Nutrition Guidance: General caloric guidelines, wholesome ingredient suggestions, and a feeding schedule suitable for ${pet.type}. Advise consulting a veterinarian for significant dietary changes.
+5. Exercise & Mental Stimulation: Specific daily routine (walks, play, enrichment) tailored for this breed.
+6. Symptom Watchlist: General signs to monitor based on breed tendencies and age that warrant a vet consultation.
 
 CLEAN FORMATTING:
 - DO NOT use asterisks (**) or markdown bolding.
-- Use clear headers like [1. VITALITY SCORE].
+- Use clear headers like [1. WELLNESS SCORE].
 - Use bullet points (•) for lists.
-- Maintain a professional, expert veterinary tone.`;
+- Maintain a helpful, educational, and professional tone.`;
 
-
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [{ role: 'system', content: prompt }],
-                temperature: 0.7,
+                temperature: 0.6,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let roadmapContent = response.data.choices[0].message.content;
-        roadmapContent = roadmapContent.replace(/\*\*/g, '').replace(/\*/g, '');
+        roadmapContent = validateAndSanitizeAIResponse(roadmapContent, '', 'roadmap');
 
         // Mark previous plans as not latest
         await Roadmap.updateMany({ petId }, { isLatest: false });
@@ -235,7 +254,7 @@ CLEAN FORMATTING:
 };
 
 /**
- * @desc    AI Symptom Checker - Analyze pet symptoms and provide urgency rating
+ * @desc    AI Symptom Checker - Triage symptoms and provide urgency classification & guidance
  * @route   POST /api/ai/symptom-check
  * @access  Private
  */
@@ -254,15 +273,15 @@ exports.symptomCheck = async (req, res, next) => {
 
         const healthRecords = await HealthRecord.find({ petId }).sort({ date: -1 }).limit(5);
 
-        const prompt = `You are an expert Veterinary Diagnostician.
-Analyze these symptoms for a pet:
+        const prompt = `You are an AI Pet Care Assistant providing symptom triage and educational guidance.
+Analyze these reported symptoms for educational guidance:
 
 PET PROFILE:
 - Name: ${pet.name}
 - Species: ${pet.type}
 - Breed: ${pet.breed || 'Unknown'}
 - Age: ${pet.calculatedAge || pet.age || 'Unknown'} years
-- Weight: ${pet.weight} ${pet.weightUnit}
+- Weight: ${pet.weight} ${pet.weightUnit || 'kg'}
 - Recent History: ${healthRecords.map(r => r.title).join(', ')}
 
 SYMPTOMS REPORTED:
@@ -270,36 +289,49 @@ ${symptoms}
 
 DURATION: ${duration || 'Not specified'}
 
+${SYSTEM_SAFETY_INSTRUCTION}
+
 PROVIDE:
-1. URGENCY LEVEL: Rate as LOW, MEDIUM, HIGH, or EMERGENCY
-2. POSSIBLE CAUSES: List 2-3 most likely causes
-3. IMMEDIATE ACTIONS: What the owner should do right now
-4. VET VISIT: Should they see a vet? When?
-5. HOME CARE: Any safe home remedies or monitoring tips
+1. URGENCY LEVEL: Explicitly classify as one of:
+   - MONITOR (Mild symptoms suitable for close home monitoring)
+   - CONTACT A VETERINARIAN (Non-emergency concern that requires professional veterinary evaluation)
+   - URGENT VETERINARY ATTENTION (Potentially serious condition requiring immediate veterinary or ER care)
+2. POSSIBLE ASSOCIATIONS: List 2-3 conditions that can be associated with these symptoms.
+   IMPORTANT: Never provide a definitive diagnosis or say "Your pet has X". Always use phrasing like: "These symptoms can be associated with several conditions. A licensed veterinarian can evaluate your pet in person to determine the underlying cause."
+3. IMMEDIATE ACTIONS: Safe, practical supportive steps the owner can take right now.
+4. VETERINARY CONSULTATION: When to see a vet and what questions to ask.
+5. HOME MONITORING: What changes or vital signs to watch closely.
 
-FORMATTING: No asterisks, use bullet points (•), be clear and calming.`;
+FORMATTING: No asterisks, use bullet points (•), be clear, empathetic, and calming.`;
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [{ role: 'system', content: prompt }],
-                temperature: 0.6,
+                temperature: 0.5,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let analysis = response.data.choices[0].message.content;
-        analysis = analysis.replace(/\*\*/g, '').replace(/\*/g, '');
+        analysis = validateAndSanitizeAIResponse(analysis, symptoms, 'symptom_check');
 
-        // Extract urgency level
-        const urgencyMatch = analysis.match(/URGENCY LEVEL:\s*(LOW|MEDIUM|HIGH|EMERGENCY)/i);
-        const urgency = urgencyMatch ? urgencyMatch[1].toUpperCase() : 'MEDIUM';
+        // Extract standardized urgency level
+        let urgency = 'CONTACT A VETERINARIAN';
+        if (/URGENT VETERINARY ATTENTION|EMERGENCY|HIGH/i.test(analysis)) {
+            urgency = 'URGENT VETERINARY ATTENTION';
+        } else if (/MONITOR|LOW/i.test(analysis)) {
+            urgency = 'MONITOR';
+        } else {
+            urgency = 'CONTACT A VETERINARIAN';
+        }
 
         res.status(200).json({
             success: true,
@@ -311,9 +343,8 @@ FORMATTING: No asterisks, use bullet points (•), be clear and calming.`;
     }
 };
 
-
 /**
- * @desc    AI Behavior Decoder & Training Plan
+ * @desc    AI Behavior & Training Plan
  * @route   POST /api/ai/behavior-training
  * @access  Private
  */
@@ -330,7 +361,7 @@ exports.behaviorTraining = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Pet not found' });
         }
 
-        const prompt = `You are a Certified Animal Behaviorist.
+        const prompt = `You are an AI Pet Care Assistant specializing in positive-reinforcement training and behavioral guidance.
 
 PET PROFILE:
 - Species: ${pet.type}
@@ -340,34 +371,36 @@ PET PROFILE:
 BEHAVIOR ISSUE:
 ${behaviorIssue}
 
-PROVIDE A COMPREHENSIVE BEHAVIORAL ANALYSIS & TRAINING PLAN:
+${SYSTEM_SAFETY_INSTRUCTION}
 
-1. BEHAVIORAL ANALYSIS: Identify what are "unusual patterns" or triggers in this behavior based on breed tendencies and age.
-2. ROOT CAUSE ANALYSIS: Why is this happening? (anxiety, boredom, instinctual drive, or medical discomfort).
-3. 7-DAY TRAINING PLAN: Day-by-day exercises with specific instructions.
-4. DO's and DON'Ts: Critical mistakes to avoid.
-5. PROGRESS MARKERS: How to know if it's working.
-6. WHEN TO GET HELP: Signs you need a professional trainer or if it's a medical issue.
+PROVIDE A COMPREHENSIVE POSITIVE TRAINING GUIDE:
+1. BEHAVIOR OBSERVATION: Potential triggers or patterns based on age and breed tendencies.
+   IMPORTANT: Do not make definitive medical or psychiatric diagnoses (e.g. do not say "Your dog has anxiety"). Use phrasing like: "This behavior can sometimes be associated with stress or anxiety, but a veterinarian or qualified behavior professional can evaluate the underlying cause."
+2. 7-DAY POSITIVE TRAINING PLAN: Day-by-day positive reinforcement drills with clear, gentle steps.
+3. DO's and DON'Ts: Key training mistakes to avoid.
+4. PROGRESS MARKERS: Positive signs that indicate improvement.
+5. WHEN TO SEEK PROFESSIONAL HELP: When to consult a certified trainer, veterinary behaviorist, or vet to rule out underlying pain/medical causes.
 
-FORMATTING: No asterisks, use bullet points (•), be encouraging and specific.`;
+FORMATTING: No asterisks, use bullet points (•), be encouraging, practical, and specific.`;
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [{ role: 'system', content: prompt }],
-                temperature: 0.7,
+                temperature: 0.6,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let trainingPlan = response.data.choices[0].message.content;
-        trainingPlan = trainingPlan.replace(/\*\*/g, '').replace(/\*/g, '');
+        trainingPlan = validateAndSanitizeAIResponse(trainingPlan, behaviorIssue, 'behavior');
 
         res.status(200).json({
             success: true,
@@ -393,11 +426,10 @@ exports.expenseOptimizer = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Pet not found' });
         }
 
-        // Calculate totals from expenses
         const totalSpent = expenses?.reduce((sum, exp) => sum + (exp.amount || 0), 0) || 0;
         const expenseBreakdown = expenses?.map(e => `${e.category}: ${currency} ${e.amount}`).join(', ') || 'No data';
 
-        const prompt = `You are a Pet Care Financial Advisor.
+        const prompt = `You are a Pet Care Financial & Budgeting Assistant.
 
 PET PROFILE:
 - Species: ${pet.type}
@@ -408,35 +440,36 @@ CURRENT SPENDING:
 Total: ${currency} ${totalSpent}
 Breakdown: ${expenseBreakdown}
 
-PROVIDE:
+${SYSTEM_SAFETY_INSTRUCTION}
 
-1. SPENDING ANALYSIS: Is this normal for this breed/age?
-2. COST-SAVING OPPORTUNITIES: 3-5 specific ways to reduce costs without compromising care
-3. ANNUAL PROJECTION: Estimated yearly costs based on current spending
-4. BUDGET RECOMMENDATIONS: Ideal monthly budget breakdown
-5. HIDDEN COSTS: Common expenses owners forget to budget for
+PROVIDE:
+1. SPENDING ANALYSIS: General perspective on typical care costs for this breed/age.
+2. COST-SAVING OPPORTUNITIES: 3-5 specific ways to economize on food, toys, and supplies without compromising pet health or veterinary care.
+3. ANNUAL PROJECTION: Estimated yearly spending based on current patterns.
+4. BUDGET RECOMMENDATIONS: Suggested monthly allocation across essentials, enrichment, and a veterinary emergency fund.
+5. PREVENTATIVE CARE VALUE: How regular veterinary checkups help avoid costly emergencies.
 
 NOTE: All financial figures must be in ${currency}.
-
 FORMATTING: No asterisks, use bullet points (•), be practical and money-conscious.`;
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [{ role: 'system', content: prompt }],
                 temperature: 0.6,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let optimization = response.data.choices[0].message.content;
-        optimization = optimization.replace(/\*\*/g, '').replace(/\*/g, '');
+        optimization = validateAndSanitizeAIResponse(optimization, '', 'expense');
 
         res.status(200).json({
             success: true,
@@ -464,45 +497,48 @@ exports.nutritionAdvice = async (req, res, next) => {
 
         const healthRecords = await HealthRecord.find({ petId }).sort({ date: -1 }).limit(10);
 
-        const prompt = `You are an expert Pet Nutritionist.
-Analyze the nutritional needs for this pet:
+        const prompt = `You are an AI Pet Care Assistant providing educational pet nutrition and diet guidance.
+Analyze the nutritional considerations for this pet:
 
 PET PROFILE:
 - Species: ${pet.type}
 - Breed: ${pet.breed || 'Unknown'}
 - Age: ${pet.calculatedAge || pet.age || 'Unknown'} years
-- Weight: ${pet.weight} ${pet.weightUnit}
+- Weight: ${pet.weight} ${pet.weightUnit || 'kg'}
 - Recent Medical History: ${healthRecords.map(r => r.title).join(', ')}
 
 CURRENT DIET: ${currentDiet || 'Not specified'}
-HEALTH GOALS: ${healthGoals || 'General health maintenance'}
+HEALTH GOALS: ${healthGoals || 'General wellness and maintenance'}
+
+${SYSTEM_SAFETY_INSTRUCTION}
 
 PROVIDE:
-1. NUTRITIONAL ASSESSMENT: Key requirements for this breed/age.
-2. RECOMMENDED FOOD TYPES: Specific ingredients or commercial diet types (e.g., high-protein, low-carb, grain-free).
-3. FEEDING SCHEDULE: Optimal frequency and portion sizes.
-4. FOODS TO AVOID: Specific triggers or harmful foods for this breed.
-5. SUPPLEMENT RECOMMENDATIONS: If any are needed based on history.
+1. GENERAL NUTRITIONAL OVERVIEW: Key nutritional requirements for this life stage and breed.
+2. DIETARY CONSIDERATIONS: Wholesome ingredients, macronutrient balance, and food categories (e.g. high-protein, age-appropriate formulas).
+3. FEEDING ROUTINE: General portion sizing and daily feeding frequency recommendations.
+4. FOODS TO AVOID: Toxic and unsafe ingredients for this species (e.g. chocolate, onions, grapes, xylitol).
+5. VETERINARY ADVICE: Explicitly state that for pets with known medical conditions or before making significant dietary transitions, the owner should discuss changes with their veterinarian.
 
-FORMATTING: No asterisks, use bullet points (•), be precise and professional.`;
+FORMATTING: No asterisks, use bullet points (•), be informative and professional.`;
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [{ role: 'system', content: prompt }],
-                temperature: 0.7,
+                temperature: 0.6,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let advice = response.data.choices[0].message.content;
-        advice = advice.replace(/\*\*/g, '').replace(/\*/g, '');
+        advice = validateAndSanitizeAIResponse(advice, '', 'nutrition');
 
         res.status(200).json({
             success: true,
@@ -515,7 +551,7 @@ FORMATTING: No asterisks, use bullet points (•), be precise and professional.`
 };
 
 /**
- * @desc    AI First Aid & Safety - Guidance for emergencies and poisonous items
+ * @desc    AI Pet Emergency Guide - Safety guidance for emergencies and toxic substances
  * @route   POST /api/ai/first-aid
  * @access  Private
  */
@@ -527,43 +563,43 @@ exports.firstAidGuidance = async (req, res, next) => {
 
         let context = pet ? `for a ${pet.type} (${pet.breed || 'Unknown'})` : 'for a pet';
 
-        const prompt = `You are an Emergency Veterinary Technician.
-Provide immediate first aid guidance ${context}.
+        const prompt = `You are an AI Pet Care Assistant providing emergency safety guidance ${context}.
 
-EMERGENCY TYPE: ${emergencyType}
-ITEM INVOLVED (if any): ${itemInvolved}
+EMERGENCY / SITUATION: ${emergencyType}
+ITEM INVOLVED (if any): ${itemInvolved || 'None'}
 
-IF THIS IS A POISONING/TOXICITY CASE:
-- Identify if the item is dangerous.
-- Provide immediate steps to take.
-- List common symptoms of this poisoning.
+${SYSTEM_SAFETY_INSTRUCTION}
 
-FOR GENERAL EMERGENCIES:
-- Step-by-step stabilization instructions.
-- What NOT to do (critical mistakes).
-- Signs that require immediate ER visit.
+GUIDELINES:
+1. EMERGENCY VETERINARY PRIORITIZATION: If this is an acute or potentially serious situation, prominently instruct:
+   - "Contact an emergency veterinarian immediately."
+   - "Find the nearest open veterinary hospital or animal poison control hotline."
+2. STABILIZATION & SAFETY:
+   - Provide safe, non-invasive first aid steps to keep the pet calm and safe while arranging emergency veterinary care.
+   - List critical WHAT NOT TO DO actions (e.g. do not induce vomiting unless explicitly directed by a veterinarian or poison helpline, do not give human medication).
+3. TOXICITY WARNING: If a toxic substance is involved, identify common risks and symptoms to watch for.
+4. LIMITATIONS: Clearly state that first aid is only for temporary stabilization and is never a substitute for hands-on emergency veterinary treatment. Never claim home treatment is definitely safe.
 
-DISCLAIMER: Always emphasize that this is for stability and they must contact a vet immediately.
+FORMATTING: Use clear uppercase headers (without asterisks), use bullet points (•), be calm, clear, and prioritize emergency vet contact.`;
 
-FORMATTING: Use bold headers (without asterisks), use bullet points (•), be urgent yet calm and clear.`;
-
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [{ role: 'system', content: prompt }],
-                temperature: 0.5, // Lower temperature for more factual/safe responses
+                temperature: 0.4,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let guidance = response.data.choices[0].message.content;
-        guidance = guidance.replace(/\*\*/g, '').replace(/\*/g, '');
+        guidance = validateAndSanitizeAIResponse(guidance, emergencyType, 'first_aid');
 
         res.status(200).json({
             success: true,
@@ -571,12 +607,12 @@ FORMATTING: Use bold headers (without asterisks), use bullet points (•), be ur
         });
     } catch (error) {
         console.error('First Aid Error:', error.message);
-        res.status(500).json({ success: false, message: 'Failed to generate first aid guidance' });
+        res.status(500).json({ success: false, message: 'Failed to generate emergency guidance' });
     }
 };
 
 /**
- * @desc    AI Breed Care Guide - Specific information and care tips
+ * @desc    AI Breed Care Guide - Educational breed characteristics and care considerations
  * @route   POST /api/ai/breed-care
  * @access  Private
  */
@@ -589,40 +625,43 @@ exports.breedCareTips = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Pet not found' });
         }
 
-        const prompt = `You are an expert on Pet Breeds and Care.
-Provide comprehensive care tips and characteristics for this breed:
+        const prompt = `You are an AI Pet Care Assistant providing breed-specific educational information and general care tips.
 
 SPECIES: ${pet.type}
 BREED: ${pet.breed || 'Unknown'}
 AGE: ${pet.calculatedAge || pet.age || 'Unknown'} years
 
+${SYSTEM_SAFETY_INSTRUCTION}
+
 PROVIDE:
-1. KEY CHARACTERISTICS: Personality, energy levels, temperament.
-2. GROOMING NEEDS: Coat care, bathing, nail trimming specifics.
-3. EXERCISE REQUIREMENTS: Daily activity levels and best types of play.
-4. COMMON HEALTH TRENDS: Genetic predispositions or breed-specific risks to watch for.
-5. TRAINING STYLE: Best approach for this breed's intelligence and motivation.
-6. LIFE STAGE ADVICE: Specific tips for their current age (${pet.calculatedAge || pet.age} years).
+1. BREED CHARACTERISTICS: General personality, energy levels, and temperament tendencies.
+2. GROOMING & COAT CARE: Coat brushing, bathing frequency, and ear/nail hygiene tips.
+3. EXERCISE & ACTIVITY: Daily activity needs and recommended play styles.
+4. HEALTH CONSIDERATIONS (PROBABILISTIC):
+   IMPORTANT: Use probabilistic wording: "Some pets of this breed may be more prone to..." instead of "This breed will develop...". Do not make guaranteed health claims or diagnoses.
+5. POSITIVE TRAINING TIPS: Recommended motivational strategies for this breed type.
+6. LIFE STAGE WELLNESS: General care advice for their current age stage (${pet.calculatedAge || pet.age} years).
 
 FORMATTING: No asterisks, use bullet points (•), be informative and breed-specific.`;
 
+        const apiKey = (process.env.GROQ_API_KEY || process.env.GROK_API_KEY || '').trim();
         const response = await axios.post(
             'https://api.groq.com/openai/v1/chat/completions',
             {
-                model: 'llama-3.3-70b-versatile',
+                model: 'openai/gpt-oss-120b',
                 messages: [{ role: 'system', content: prompt }],
-                temperature: 0.7,
+                temperature: 0.6,
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.GROK_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
 
         let guide = response.data.choices[0].message.content;
-        guide = guide.replace(/\*\*/g, '').replace(/\*/g, '');
+        guide = validateAndSanitizeAIResponse(guide, '', 'breed_care');
 
         res.status(200).json({
             success: true,
@@ -671,7 +710,7 @@ exports.saveAIInsight = async (req, res, next) => {
 };
 
 /**
- * @desc    Export AI Insight as PDF
+ * @desc    Export AI Insight as PDF with compliance disclaimer
  * @route   GET /api/ai/export-pdf/:insightId
  * @access  Private (Token in query allowed)
  */
@@ -693,7 +732,6 @@ exports.exportAIInsightPDF = async (req, res, next) => {
         const pet = insight.petId;
         const doc = new PDFDocument({ margin: 50 });
 
-        // Buffering the PDF to memory to send it
         let buffers = [];
         doc.on('data', buffers.push.bind(buffers));
         doc.on('end', () => {
@@ -706,33 +744,45 @@ exports.exportAIInsightPDF = async (req, res, next) => {
         });
 
         // Header
-        doc.fillColor('#6366f1').fontSize(24).text('PetVitals AI Report', { align: 'center' });
-        doc.moveDown();
+        doc.fillColor('#6366f1').fontSize(22).text('PetVitals AI Report', { align: 'center' });
+        doc.moveDown(0.5);
 
         // Title
-        doc.fillColor('#000').fontSize(18).text(insight.title, { underline: true });
+        doc.fillColor('#000').fontSize(16).text(insight.title, { underline: true });
         doc.moveDown(0.5);
 
         // Pet Info
-        doc.fontSize(12).fillColor('#444');
-        doc.text(`Patient: ${pet.name} (${pet.type})`);
+        doc.fontSize(11).fillColor('#444');
+        doc.text(`Pet: ${pet.name} (${pet.type})`);
         doc.text(`Breed: ${pet.breed || 'Unknown'}`);
-        doc.text(`Date: ${new Date(insight.createdAt).toLocaleDateString()}`);
+        doc.text(`Generated Date: ${new Date(insight.createdAt).toLocaleDateString()}`);
         doc.moveDown();
 
         // Divider
-        doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#eee').stroke();
+        doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#ddd').stroke();
         doc.moveDown();
 
-        // Content - Handling potential multiple lines/paragraphs
-        doc.fillColor('#333').fontSize(12).text(insight.content, {
+        // Content
+        doc.fillColor('#333').fontSize(11).text(insight.content, {
             lineGap: 4,
             paragraphGap: 10,
-            align: 'justify'
+            align: 'left'
+        });
+        doc.moveDown(1.5);
+
+        // Required Medical Disclaimer Box
+        doc.fillColor('#b45309').fontSize(9).text(`IMPORTANT MEDICAL DISCLAIMER:\n${MEDICAL_DISCLAIMER_TEXT}`, {
+            align: 'center',
+            lineGap: 2
         });
 
         // Footer
-        doc.fontSize(10).fillColor('#999').text(`Generated by PetVitals AI Hub • Owner: ${insight.userId.name}`, 50, doc.page.height - 50, { align: 'center' });
+        doc.fontSize(9).fillColor('#999').text(
+            `Generated by PetVitals AI Assistant • Owner: ${insight.userId.name}`,
+            50,
+            doc.page.height - 40,
+            { align: 'center' }
+        );
 
         doc.end();
     } catch (error) {
