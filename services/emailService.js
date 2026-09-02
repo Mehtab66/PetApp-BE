@@ -8,26 +8,14 @@ const config = require('../config/config');
  */
 
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true, // true for 465 (Implicit TLS)
+    service: 'gmail',
     auth: {
         user: (process.env.EMAIL_USER || '').trim(),
         pass: (process.env.EMAIL_PASS || '').replace(/\s+/g, '').trim(),
     },
-    // FORCE IPv4 to avoid ENETUNREACH errors on cloud platforms like Render
-    // We use a custom lookup function to ensure we only get IPv4 addresses
-    lookup: (hostname, options, callback) => {
-        return dns.lookup(hostname, { family: 4 }, callback);
-    },
-    family: 4,
-    // Add timeouts to prevent hanging the entire request if SMTP is slow
-    connectionTimeout: 25000, // 25 seconds
-    greetingTimeout: 20000,   // 20 seconds
-    socketTimeout: 30000,     // 30 seconds
     tls: {
-        rejectUnauthorized: false
-    }
+        rejectUnauthorized: false,
+    },
 });
 
 // Verify transporter on startup with detailed logging
