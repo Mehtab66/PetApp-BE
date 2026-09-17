@@ -10,7 +10,7 @@ const { toMarketplaceItem } = require('../services/amazonItemMapper');
  */
 exports.getItems = async (req, res, next) => {
     try {
-        const { category, search, minPrice, maxPrice, sortBy } = req.query;
+        const { category, search, minPrice, maxPrice, sortBy, petType, petBreed } = req.query;
 
         // Only show available Amazon products
         let query = { status: 'Available' };
@@ -30,27 +30,33 @@ exports.getItems = async (req, res, next) => {
 
         let items = await MarketplaceItem.find(query).sort(sortOption);
 
-        // DYNAMIC AMAZON INJECTION:
-        // If the DB has fewer than 5 results for this query, supplement with live Amazon results
-        if (search || items.length < 5) {
-            const amazonKeyword = search
-                || (category && category !== 'All' ? `pet ${category}` : 'pet supplies best sellers');
+        const amazonKeyword = [
+            petBreed,
+            petType,
+            search || (category && category !== 'All' ? category : 'pet supplies'),
+        ].filter(Boolean).join(' ').trim();
 
-            if (!creatorsApi.isConfigured()) {
-                console.warn('[MARKETPLACE] Skipping Amazon supplement — add CREATORS_* credentials to .env');
-            } else {
-                console.log(`[MARKETPLACE] Supplementing with Amazon results for: "${amazonKeyword}"`);
-                const amazonProducts = await amazonService.searchProducts(amazonKeyword);
+        if (!creatorsApi.isConfigured()) {
+            console.warn('[MARKETPLACE] Skipping Amazon supplement — add CREATORS_* credentials to .env');
+        } else {
+            console.log(`[MARKETPLACE] Supplementing with Amazon results for: "${amazonKeyword}"`);
+            const amazonSort = sortBy === 'price_low'
+                ? 'Price:LowToHigh'
+                : sortBy === 'price_high'
+                    ? 'Price:HighToLow'
+                    : 'AvgCustomerReviews';
+            const amazonProducts = await amazonService.searchProducts(amazonKeyword, {
+                sortBy: amazonSort,
+            });
 
-                const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
-                const formattedAmazonItems = amazonProducts
-                    .filter(p => !existingAsins.has(p.id || p.asin))
-                    .map(p => toMarketplaceItem(p, {
-                        category: category && category !== 'All' ? category : undefined,
-                    }));
+            const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
+            const formattedAmazonItems = amazonProducts
+                .filter(p => !existingAsins.has(p.id || p.asin))
+                .map(p => toMarketplaceItem(p, {
+                    category: category && category !== 'All' ? category : undefined,
+                }));
 
-                items = [...items, ...formattedAmazonItems];
-            }
+            items = [...items, ...formattedAmazonItems];
         }
 
         res.status(200).json({
@@ -203,12 +209,13 @@ exports.deleteItem = async (req, res, next) => {
  */
 exports.searchAmazonProducts = async (req, res, next) => {
     try {
-        const { q } = req.query;
-        if (!q) {
+        const { q, petType, petBreed } = req.query;
+        const keyword = [petBreed, petType, q].filter(Boolean).join(' ').trim();
+        if (!keyword) {
             return res.status(400).json({ success: false, message: 'Search term required' });
         }
 
-        const products = await amazonService.searchProducts(q);
+        const products = await amazonService.searchProducts(keyword);
 
         res.status(200).json({
             success: true,

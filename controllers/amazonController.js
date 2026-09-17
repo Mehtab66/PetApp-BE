@@ -8,15 +8,16 @@ const Click = require('../models/Click');
  */
 exports.searchAmazon = async (req, res, next) => {
     try {
-        const { q } = req.query;
-        if (!q) {
+        const { q, petType, petBreed } = req.query;
+        const keyword = [petBreed, petType, q].filter(Boolean).join(' ').trim();
+        if (!keyword) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide a search keyword'
             });
         }
 
-        const products = await amazonService.searchProducts(q);
+        const products = await amazonService.searchProducts(keyword);
 
         res.status(200).json({
             success: true,

@@ -88,14 +88,38 @@ function extractPrice(item) {
     };
 }
 
+function coerceRating(raw) {
+    if (raw == null || raw === '') return null;
+    if (typeof raw === 'number') {
+        if (Number.isNaN(raw)) return null;
+        if (raw > 5 && raw <= 50) return raw / 10;
+        return raw;
+    }
+    if (typeof raw === 'string') {
+        const match = raw.match(/(\d+(?:\.\d+)?)/);
+        if (!match) return null;
+        return coerceRating(Number(match[1]));
+    }
+    return coerceRating(raw.value ?? raw.Value ?? raw.displayValue ?? raw.DisplayValue);
+}
+
 function extractRating(item) {
-    const starRating = item?.customerReviews?.starRating || item?.CustomerReviews?.StarRating;
-    if (starRating == null) return null;
-    if (typeof starRating === 'number') return starRating;
-    const value = starRating.value ?? starRating.Value;
-    if (value == null || value === '') return null;
-    const numeric = Number(value);
-    return Number.isNaN(numeric) ? null : numeric;
+    const reviews = item?.customerReviews || item?.CustomerReviews || {};
+    return coerceRating(
+        reviews.starRating
+        ?? reviews.StarRating
+        ?? reviews.rating
+        ?? reviews.Rating
+        ?? item?.starRating
+        ?? item?.rating
+    );
+}
+
+function extractReviewsCount(item) {
+    const reviews = item?.customerReviews || item?.CustomerReviews || {};
+    const count = reviews.count ?? reviews.Count ?? item?.reviewsCount ?? 0;
+    const numeric = Number(count);
+    return Number.isNaN(numeric) ? 0 : numeric;
 }
 
 function extractFeatures(item) {
@@ -162,9 +186,7 @@ function mapCreatorItem(item) {
         || displayValue(item?.itemInfo?.manufactureInfo?.name)
         || displayValue(item?.ItemInfo?.ByLineInfo?.Brand);
 
-    const reviewsCount = item?.customerReviews?.count
-        ?? item?.CustomerReviews?.Count
-        ?? 0;
+    const reviewsCount = extractReviewsCount(item);
     const dealBadge = listing?.dealDetails?.badge || listing?.DealDetails?.Badge || null;
 
     return {

@@ -5,7 +5,9 @@ const { PRODUCT_RESOURCES, mapCreatorItem } = require('./amazonItemMapper');
 
 const CACHE_TTL_SECONDS = 45 * 60;
 const EMPTY_CACHE_TTL_SECONDS = 5 * 60;
-const MIN_COOLDOWN_MS = 1000;
+const MIN_COOLDOWN_MS = 250;
+const PAGE_SIZE = 10; // Amazon SearchItems max per request
+const MAX_PAGES = 10; // Amazon SearchItems max page index
 
 const myCache = new NodeCache({ stdTTL: CACHE_TTL_SECONDS, checkperiod: 120 });
 const pendingRequests = new Map();
@@ -13,16 +15,27 @@ const pendingRequests = new Map();
 let lastApiHitTimestamp = 0;
 let circuitOpenUntil = 0;
 
-function extractSearchItems(response) {
+function extractSearchResult(response) {
     const body = response && response.searchResult ? response : response?.data;
     const searchResult = body?.searchResult || body?.SearchResult || {};
-    return searchResult.items || searchResult.Items || [];
+    return {
+        items: searchResult.items || searchResult.Items || [],
+        total: searchResult.totalResultCount || searchResult.TotalResultCount || 0,
+    };
 }
 
 function extractGetItems(response) {
     const body = response?.itemsResult || response?.data?.itemsResult || response;
     const items = body?.items || body?.Items || [];
     return items;
+}
+
+function cacheProductsByAsin(products) {
+    products.forEach((product) => {
+        if (product?.asin) {
+            myCache.set(`item_${product.asin}`, product, CACHE_TTL_SECONDS);
+        }
+    });
 }
 
 async function respectCooldown() {
@@ -45,8 +58,36 @@ function handleApiError(err, context) {
     }
 }
 
+function isPageLimitError(err) {
+    const message = err.message || String(err);
+    return /itemPage|itemCount|invalid parameter|400/i.test(message);
+}
+
+async function fetchSearchPage(keyword, page, sortBy) {
+    await respectCooldown();
+    lastApiHitTimestamp = Date.now();
+
+    const request = new SearchItemsRequestContent();
+    request.partnerTag = creatorsApi.getPartnerTag();
+    request.keywords = keyword;
+    request.searchIndex = 'PetSupplies';
+    request.itemCount = PAGE_SIZE;
+    request.itemPage = page;
+    request.resources = PRODUCT_RESOURCES;
+    if (sortBy) request.sortBy = sortBy;
+
+    const api = creatorsApi.getApi();
+    const data = await api.searchItems(creatorsApi.getMarketplace(), request);
+    const result = extractSearchResult(data);
+    return {
+        items: result.items.map(mapCreatorItem).filter(Boolean),
+        rawCount: result.items.length,
+        total: result.total,
+    };
+}
+
 const amazonService = {
-    searchProducts: async (keyword) => {
+    searchProducts: async (keyword, options = {}) => {
         const cleanKeyword = (keyword || '').trim().toLowerCase();
         if (!cleanKeyword) return [];
 
@@ -55,7 +96,9 @@ const amazonService = {
             return [];
         }
 
-        const cacheKey = `search_${cleanKeyword.replace(/\s+/g, '_')}`;
+        const maxPages = Math.min(Math.max(options.maxPages || MAX_PAGES, 1), MAX_PAGES);
+        const sortBy = options.sortBy || 'AvgCustomerReviews';
+        const cacheKey = `search_${cleanKeyword.replace(/\s+/g, '_')}_p${maxPages}_${sortBy}`;
         const cachedResults = myCache.get(cacheKey);
         if (cachedResults) return cachedResults;
         if (pendingRequests.has(cacheKey)) return pendingRequests.get(cacheKey);
@@ -67,27 +110,29 @@ const amazonService = {
                     return [];
                 }
 
-                await respectCooldown();
-                lastApiHitTimestamp = Date.now();
+                const all = [];
+                const seen = new Set();
 
-                const request = new SearchItemsRequestContent();
-                request.partnerTag = creatorsApi.getPartnerTag();
-                request.keywords = cleanKeyword;
-                request.searchIndex = 'PetSupplies';
-                request.itemCount = 10;
-                request.resources = PRODUCT_RESOURCES;
-
-                const api = creatorsApi.getApi();
-                const data = await api.searchItems(creatorsApi.getMarketplace(), request);
-                const results = extractSearchItems(data).map(mapCreatorItem).filter(Boolean);
-
-                myCache.set(cacheKey, results, results.length > 0 ? CACHE_TTL_SECONDS : EMPTY_CACHE_TTL_SECONDS);
-                results.forEach((product) => {
-                    if (product?.asin) {
-                        myCache.set(`item_${product.asin}`, product, CACHE_TTL_SECONDS);
+                for (let page = 1; page <= maxPages; page++) {
+                    try {
+                        const { items, rawCount } = await fetchSearchPage(cleanKeyword, page, sortBy);
+                        items.forEach((product) => {
+                            if (!seen.has(product.asin)) {
+                                seen.add(product.asin);
+                                all.push(product);
+                            }
+                        });
+                        if (rawCount < PAGE_SIZE) break;
+                    } catch (err) {
+                        handleApiError(err, `SearchItems page ${page} failed`);
+                        if (page === 1 || isPageLimitError(err)) break;
                     }
-                });
-                return results;
+                }
+
+                myCache.set(cacheKey, all, all.length > 0 ? CACHE_TTL_SECONDS : EMPTY_CACHE_TTL_SECONDS);
+                cacheProductsByAsin(all);
+                console.log(`[AMAZON_LOG] Search "${cleanKeyword}" returned ${all.length} products`);
+                return all;
             } catch (err) {
                 handleApiError(err, 'SearchItems failed');
                 return [];
