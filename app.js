@@ -21,6 +21,7 @@ const vaultRoutes = require('./routes/vault');
 const publicRoutes = require('./routes/public');
 const marketplaceRoutes = require('./routes/marketplace');
 const amazonRoutes = require('./routes/amazon');
+const recommendationRoutes = require('./routes/recommendations');
 const weightRoutes = require('./routes/weight');
 const walkRoutes = require('./routes/walk');
 
@@ -62,6 +63,7 @@ app.use('/api/vault', vaultRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/amazon', amazonRoutes);
+app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/weight', weightRoutes);
 app.use('/api/walks', walkRoutes);
 

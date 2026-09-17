@@ -18,6 +18,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "amazon-creators-api": "^1.2.2",
     "amazon-paapi": "^1.0.7",
     "axios": "^1.13.4",
     "bcryptjs": "^2.4.3",

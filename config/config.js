@@ -30,4 +30,13 @@ module.exports = {
       ? process.env.ALLOWED_ORIGINS.split(',') 
       : ['*']  // Allow all in development
   },
+
+    // Amazon Creators API — server-side only
+    creatorsApi: {
+        credentialId: process.env.CREATORS_CREDENTIAL_ID,
+        version: process.env.CREATORS_CREDENTIAL_VERSION || '3.1',
+        partnerTag: process.env.CREATORS_PARTNER_TAG,
+        marketplace: process.env.CREATORS_MARKETPLACE || 'www.amazon.com',
+        cacheTtlSeconds: 45 * 60,
+    },
 };
