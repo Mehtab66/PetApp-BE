@@ -1,5 +1,6 @@
 const amazonService = require('../services/amazonService');
 const Click = require('../models/Click');
+const { buildPetSearch, rankAndFilter } = require('../services/petSearchQuery');
 
 /**
  * @desc    Search Amazon products
@@ -8,21 +9,30 @@ const Click = require('../models/Click');
  */
 exports.searchAmazon = async (req, res, next) => {
     try {
-        const { q, petType, petBreed } = req.query;
-        const keyword = [petBreed, petType, q].filter(Boolean).join(' ').trim();
-        if (!keyword) {
+        const { q, petType, petBreed, page } = req.query;
+        const petSearch = buildPetSearch({ petType, petBreed, search: q });
+        if (!petSearch.keyword) {
             return res.status(400).json({
                 success: false,
-                message: 'Please provide a search keyword'
+                message: 'Please provide a search keyword or select a pet'
             });
         }
 
-        const products = await amazonService.searchProducts(keyword);
+        const pageNum = Math.min(Math.max(parseInt(page, 10) || 1, 1), 10);
+        const amazonPage = await amazonService.searchPage(petSearch.keyword, {
+            page: pageNum,
+            sortBy: 'Relevance',
+        });
+        const products = rankAndFilter(amazonPage.products, petSearch.profile);
 
         res.status(200).json({
             success: true,
             count: products.length,
-            data: { products }
+            data: {
+                products,
+                page: pageNum,
+                hasMore: Boolean(amazonPage.hasMore),
+            }
         });
     } catch (error) {
         console.error('Amazon Search Controller Error:', error);

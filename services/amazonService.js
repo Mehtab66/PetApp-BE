@@ -87,18 +87,20 @@ async function fetchSearchPage(keyword, page, sortBy) {
 }
 
 const amazonService = {
-    searchProducts: async (keyword, options = {}) => {
+    searchPage: async (keyword, options = {}) => {
         const cleanKeyword = (keyword || '').trim().toLowerCase();
-        if (!cleanKeyword) return [];
+        const page = Math.min(Math.max(parseInt(options.page, 10) || 1, 1), MAX_PAGES);
+        const sortBy = options.sortBy || 'Relevance';
+        const empty = { products: [], page, hasMore: false, total: 0 };
+
+        if (!cleanKeyword) return empty;
 
         if (Date.now() < circuitOpenUntil) {
             console.log('[AMAZON_LOG] Circuit breaker open — skipping Creators API call');
-            return [];
+            return empty;
         }
 
-        const maxPages = Math.min(Math.max(options.maxPages || MAX_PAGES, 1), MAX_PAGES);
-        const sortBy = options.sortBy || 'AvgCustomerReviews';
-        const cacheKey = `search_${cleanKeyword.replace(/\s+/g, '_')}_p${maxPages}_${sortBy}`;
+        const cacheKey = `page_${cleanKeyword.replace(/\s+/g, '_')}_${page}_${sortBy}`;
         const cachedResults = myCache.get(cacheKey);
         if (cachedResults) return cachedResults;
         if (pendingRequests.has(cacheKey)) return pendingRequests.get(cacheKey);
@@ -107,35 +109,23 @@ const amazonService = {
             try {
                 if (!creatorsApi.isConfigured()) {
                     console.warn('[AMAZON_LOG] Creators API is not configured.');
-                    return [];
+                    return empty;
                 }
 
-                const all = [];
-                const seen = new Set();
-
-                for (let page = 1; page <= maxPages; page++) {
-                    try {
-                        const { items, rawCount } = await fetchSearchPage(cleanKeyword, page, sortBy);
-                        items.forEach((product) => {
-                            if (!seen.has(product.asin)) {
-                                seen.add(product.asin);
-                                all.push(product);
-                            }
-                        });
-                        if (rawCount < PAGE_SIZE) break;
-                    } catch (err) {
-                        handleApiError(err, `SearchItems page ${page} failed`);
-                        if (page === 1 || isPageLimitError(err)) break;
-                    }
-                }
-
-                myCache.set(cacheKey, all, all.length > 0 ? CACHE_TTL_SECONDS : EMPTY_CACHE_TTL_SECONDS);
-                cacheProductsByAsin(all);
-                console.log(`[AMAZON_LOG] Search "${cleanKeyword}" returned ${all.length} products`);
-                return all;
+                const { items, rawCount, total } = await fetchSearchPage(cleanKeyword, page, sortBy);
+                cacheProductsByAsin(items);
+                const payload = {
+                    products: items,
+                    page,
+                    hasMore: page < MAX_PAGES && rawCount >= PAGE_SIZE,
+                    total: total || 0,
+                };
+                myCache.set(cacheKey, payload, items.length > 0 ? CACHE_TTL_SECONDS : EMPTY_CACHE_TTL_SECONDS);
+                console.log(`[AMAZON_LOG] Search "${cleanKeyword}" page ${page}: ${items.length} products hasMore=${payload.hasMore}`);
+                return payload;
             } catch (err) {
-                handleApiError(err, 'SearchItems failed');
-                return [];
+                handleApiError(err, `SearchItems page ${page} failed`);
+                return { ...empty, hasMore: false };
             } finally {
                 pendingRequests.delete(cacheKey);
             }
@@ -144,6 +134,11 @@ const amazonService = {
         const requestPromise = performSearch();
         pendingRequests.set(cacheKey, requestPromise);
         return requestPromise;
+    },
+
+    searchProducts: async (keyword, options = {}) => {
+        const result = await amazonService.searchPage(keyword, options);
+        return result.products || [];
     },
 
     getProductByAsin: async (asin) => {

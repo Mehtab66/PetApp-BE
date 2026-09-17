@@ -2,6 +2,7 @@ const MarketplaceItem = require('../models/MarketplaceItem');
 const amazonService = require('../services/amazonService');
 const creatorsApi = require('../config/creatorsApi');
 const { toMarketplaceItem } = require('../services/amazonItemMapper');
+const { buildPetSearch, rankAndFilter } = require('../services/petSearchQuery');
 
 /**
  * @desc    Get all marketplace items with filters
@@ -10,47 +11,54 @@ const { toMarketplaceItem } = require('../services/amazonItemMapper');
  */
 exports.getItems = async (req, res, next) => {
     try {
-        const { category, search, minPrice, maxPrice, sortBy, petType, petBreed } = req.query;
+        const { category, search, minPrice, maxPrice, sortBy, petType, petBreed, page } = req.query;
+        const pageNum = Math.min(Math.max(parseInt(page, 10) || 1, 1), 10);
 
-        // Only show available Amazon products
-        let query = { status: 'Available' };
+        let items = [];
+        if (pageNum === 1) {
+            let query = { status: 'Available' };
 
-        if (category && category !== 'All' && category !== '') query.category = category;
-        if (minPrice || maxPrice) {
-            query.price = {};
-            if (minPrice) query.price.$gte = parseFloat(minPrice);
-            if (maxPrice) query.price.$lte = parseFloat(maxPrice);
+            if (category && category !== 'All' && category !== '') query.category = category;
+            if (minPrice || maxPrice) {
+                query.price = {};
+                if (minPrice) query.price.$gte = parseFloat(minPrice);
+                if (maxPrice) query.price.$lte = parseFloat(maxPrice);
+            }
+            if (search) query.$text = { $search: search };
+
+            let sortOption = { createdAt: -1 };
+            if (sortBy === 'price_low') sortOption = { price: 1 };
+            else if (sortBy === 'price_high') sortOption = { price: -1 };
+            else if (sortBy === 'rating') sortOption = { rating: -1 };
+
+            items = await MarketplaceItem.find(query).sort(sortOption);
         }
-        if (search) query.$text = { $search: search };
 
-        let sortOption = { createdAt: -1 };
-        if (sortBy === 'price_low') sortOption = { price: 1 };
-        else if (sortBy === 'price_high') sortOption = { price: -1 };
-        else if (sortBy === 'rating') sortOption = { rating: -1 };
-
-        let items = await MarketplaceItem.find(query).sort(sortOption);
-
-        const amazonKeyword = [
-            petBreed,
-            petType,
-            search || (category && category !== 'All' ? category : 'pet supplies'),
-        ].filter(Boolean).join(' ').trim();
+        const petSearch = buildPetSearch({ petType, petBreed, category, search });
+        let hasMore = false;
 
         if (!creatorsApi.isConfigured()) {
             console.warn('[MARKETPLACE] Skipping Amazon supplement — add CREATORS_* credentials to .env');
         } else {
-            console.log(`[MARKETPLACE] Supplementing with Amazon results for: "${amazonKeyword}"`);
+            console.log(`[MARKETPLACE] Searching Amazon page ${pageNum} for ${petSearch.label}: "${petSearch.keyword}"`);
             const amazonSort = sortBy === 'price_low'
                 ? 'Price:LowToHigh'
                 : sortBy === 'price_high'
                     ? 'Price:HighToLow'
-                    : 'AvgCustomerReviews';
-            const amazonProducts = await amazonService.searchProducts(amazonKeyword, {
+                    : 'Relevance';
+            const amazonPage = await amazonService.searchPage(petSearch.keyword, {
+                page: pageNum,
                 sortBy: amazonSort,
             });
+            hasMore = Boolean(amazonPage.hasMore);
+            const matchedAmazon = rankAndFilter(amazonPage.products, petSearch.profile);
+
+            if (petSearch.profile) {
+                items = rankAndFilter(items, petSearch.profile);
+            }
 
             const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
-            const formattedAmazonItems = amazonProducts
+            const formattedAmazonItems = matchedAmazon
                 .filter(p => !existingAsins.has(p.id || p.asin))
                 .map(p => toMarketplaceItem(p, {
                     category: category && category !== 'All' ? category : undefined,
@@ -62,7 +70,11 @@ exports.getItems = async (req, res, next) => {
         res.status(200).json({
             success: true,
             count: items.length,
-            data: { items }
+            data: {
+                items,
+                page: pageNum,
+                hasMore,
+            }
         });
     } catch (error) {
         next(error);
@@ -209,17 +221,28 @@ exports.deleteItem = async (req, res, next) => {
  */
 exports.searchAmazonProducts = async (req, res, next) => {
     try {
-        const { q, petType, petBreed } = req.query;
-        const keyword = [petBreed, petType, q].filter(Boolean).join(' ').trim();
-        if (!keyword) {
+        const { q, petType, petBreed, page } = req.query;
+        const petSearch = buildPetSearch({ petType, petBreed, search: q });
+        if (!petSearch.keyword) {
             return res.status(400).json({ success: false, message: 'Search term required' });
         }
 
-        const products = await amazonService.searchProducts(keyword);
+        const pageNum = Math.min(Math.max(parseInt(page, 10) || 1, 1), 10);
+        const amazonPage = await amazonService.searchPage(petSearch.keyword, {
+            page: pageNum,
+            sortBy: 'Relevance',
+        });
+        const products = rankAndFilter(amazonPage.products, petSearch.profile);
 
         res.status(200).json({
             success: true,
             count: products.length,
+            data: {
+                products,
+                page: pageNum,
+                hasMore: Boolean(amazonPage.hasMore),
+            }
+        });
             data: { products }
         });
     } catch (error) {
