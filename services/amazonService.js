@@ -150,4 +150,6 @@ const amazonService = {
     },
 };
 
+console.log('[AMAZON_LOG] Search backend: Creators API (PA-API disabled)');
+
 module.exports = amazonService;

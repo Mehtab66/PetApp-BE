@@ -1,5 +1,6 @@
 const MarketplaceItem = require('../models/MarketplaceItem');
 const amazonService = require('../services/amazonService');
+const creatorsApi = require('../config/creatorsApi');
 
 /**
  * @desc    Get all marketplace items with filters
@@ -34,34 +35,37 @@ exports.getItems = async (req, res, next) => {
             const amazonKeyword = search
                 || (category && category !== 'All' ? `pet ${category}` : 'pet supplies best sellers');
 
-            console.log(`[MARKETPLACE] Supplementing with Amazon results for: "${amazonKeyword}"`);
-            const amazonProducts = await amazonService.searchProducts(amazonKeyword);
+            if (!creatorsApi.isConfigured()) {
+                console.warn('[MARKETPLACE] Skipping Amazon supplement — add CREATORS_* credentials to .env');
+            } else {
+                console.log(`[MARKETPLACE] Supplementing with Amazon results for: "${amazonKeyword}"`);
+                const amazonProducts = await amazonService.searchProducts(amazonKeyword);
 
-            // Map Amazon products to the new schema format for the frontend
-            const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
-            const formattedAmazonItems = amazonProducts
-                .filter(p => !existingAsins.has(p.id)) // avoid duplicates
-                .map(p => ({
-                    _id: `amazon_${p.id}`,
-                    asin: p.id,
-                    title: p.title,
-                    description: `Rated ${p.rating}⭐ by ${p.reviewsCount} customers on Amazon.`,
-                    brand: p.brand || '',
-                    price: p.price,
-                    currency: 'USD',
-                    category: category && category !== 'All' ? category : 'Other',
-                    images: [p.image],
-                    affiliateLink: p.link,
-                    rating: p.rating,
-                    reviewsCount: p.reviewsCount,
-                    prime: p.prime || false,
-                    source: 'creators-api',
-                    status: 'Available',
-                    views: 0,
-                    isExternal: true // temporary/live result not stored in DB
-                }));
+                const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
+                const formattedAmazonItems = amazonProducts
+                    .filter(p => !existingAsins.has(p.id))
+                    .map(p => ({
+                        _id: `amazon_${p.id}`,
+                        asin: p.id,
+                        title: p.title,
+                        description: `Rated ${p.rating}⭐ by ${p.reviewsCount} customers on Amazon.`,
+                        brand: p.brand || '',
+                        price: p.price,
+                        currency: 'USD',
+                        category: category && category !== 'All' ? category : 'Other',
+                        images: [p.image],
+                        affiliateLink: p.link,
+                        rating: p.rating,
+                        reviewsCount: p.reviewsCount,
+                        prime: p.prime || false,
+                        source: 'creators-api',
+                        status: 'Available',
+                        views: 0,
+                        isExternal: true
+                    }));
 
-            items = [...items, ...formattedAmazonItems];
+                items = [...items, ...formattedAmazonItems];
+            }
         }
 
         res.status(200).json({
