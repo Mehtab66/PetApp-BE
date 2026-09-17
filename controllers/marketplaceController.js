@@ -55,7 +55,7 @@ exports.getItems = async (req, res, next) => {
                     rating: p.rating,
                     reviewsCount: p.reviewsCount,
                     prime: p.prime || false,
-                    source: 'pa-api',
+                    source: 'creators-api',
                     status: 'Available',
                     views: 0,
                     isExternal: true // temporary/live result not stored in DB

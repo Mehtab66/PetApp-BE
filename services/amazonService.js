@@ -1,129 +1,144 @@
-const AmazonPaapi = require('amazon-paapi');
 const NodeCache = require('node-cache');
+const { SearchItemsRequestContent } = require('amazon-creators-api');
+const creatorsApi = require('../config/creatorsApi');
 
-// Aggressive cache: 24 hours (86400 seconds)
-// Price/availability doesn't need to be real-time for an affiliate app
-const myCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600 });
+const CACHE_TTL_SECONDS = 45 * 60;
+const EMPTY_CACHE_TTL_SECONDS = 5 * 60;
+const MIN_COOLDOWN_MS = 1000;
 
-// Keep track of ongoing requests to prevent "cache stampede" 
-// (multiple users searching same term simultaneously)
+const myCache = new NodeCache({ stdTTL: CACHE_TTL_SECONDS, checkperiod: 120 });
 const pendingRequests = new Map();
 
-// Global cooldown to ensure we don't hit Amazon more than once every 2 seconds
 let lastApiHitTimestamp = 0;
-const MIN_COOLDOWN_MS = 2000;
+let circuitOpenUntil = 0;
+
+function extractItems(response) {
+    const body = response && response.searchResult ? response : response?.data;
+    const searchResult = body?.searchResult || body?.SearchResult || {};
+    return searchResult.items || searchResult.Items || [];
+}
+
+function extractNumericPrice(item) {
+    const listings = item?.offersV2?.listings || [];
+    const price = listings[0]?.price;
+    if (!price) return null;
+
+    const money = price.money || {};
+    if (money.amount != null && money.amount !== '') {
+        const numeric = Number(money.amount);
+        return Number.isNaN(numeric) ? null : numeric;
+    }
+
+    if (!money.displayAmount) return null;
+    const parsed = parseFloat(String(money.displayAmount).replace(/[^0-9.]/g, ''));
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+function extractRating(item) {
+    const starRating = item?.customerReviews?.starRating;
+    if (starRating == null) return null;
+    if (typeof starRating === 'number') return starRating;
+    const value = starRating.value;
+    if (value == null || value === '') return null;
+    const numeric = Number(value);
+    return Number.isNaN(numeric) ? null : numeric;
+}
+
+function mapItem(item) {
+    const asin = item?.asin;
+    const title = item?.itemInfo?.title?.displayValue;
+    const url = item?.detailPageURL;
+    if (!asin || !title || !url) return null;
+
+    const primary = item?.images?.primary;
+    return {
+        id: asin,
+        title,
+        image: primary?.large?.url || primary?.medium?.url || null,
+        price: extractNumericPrice(item),
+        rating: extractRating(item),
+        reviewsCount: item?.customerReviews?.count || 0,
+        link: url,
+    };
+}
+
+async function respectCooldown() {
+    const now = Date.now();
+    if (now - lastApiHitTimestamp < MIN_COOLDOWN_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_COOLDOWN_MS - (now - lastApiHitTimestamp)));
+    }
+}
 
 const amazonService = {
-    isTemporarilyDisabled: false, // Circuit breaker for Auth errors
     searchProducts: async (keyword) => {
-        const cleanKeyword = keyword.trim().toLowerCase();
+        const cleanKeyword = (keyword || '').trim().toLowerCase();
         if (!cleanKeyword) return [];
 
-        if (amazonService.isTemporarilyDisabled) {
-            console.log('[AMAZON_LOG] 🛡️ CIRCUIT_BREAKER: Skipping API due to temporary disablement');
-            return amazonService.getMockData(cleanKeyword);
+        if (Date.now() < circuitOpenUntil) {
+            console.log('[AMAZON_LOG] Circuit breaker open — skipping Creators API call');
+            return [];
         }
 
         const cacheKey = `search_${cleanKeyword.replace(/\s+/g, '_')}`;
-
-        // 1. Check Memory Cache
         const cachedResults = myCache.get(cacheKey);
         if (cachedResults) {
-            console.log(`[AMAZON_LOG] 📦 CACHE_HIT: Keyword "${cleanKeyword}"`);
+            console.log(`[AMAZON_LOG] Cache hit for "${cleanKeyword}"`);
             return cachedResults;
         }
 
-        // 2. Coalescing: Check if a request for this keyword is already in flight
         if (pendingRequests.has(cacheKey)) {
-            console.log(`[AMAZON_LOG] ⏳ COALESCING: Request for "${cleanKeyword}" already in flight`);
             return pendingRequests.get(cacheKey);
         }
 
-        // 3. Perform the search
         const performSearch = async () => {
             try {
-                // Rate Limiting / Cooldown
-                const now = Date.now();
-                if (now - lastApiHitTimestamp < MIN_COOLDOWN_MS) {
-                    const wait = MIN_COOLDOWN_MS - (now - lastApiHitTimestamp);
-                    console.log(`[AMAZON_LOG] ⏸️ RATE_LIMIT: Waiting ${wait}ms before calling API`);
-                    await new Promise(r => setTimeout(r, wait));
+                if (!creatorsApi.isConfigured()) {
+                    console.warn('[AMAZON_LOG] Creators API is not configured. Set CREATORS_CREDENTIAL_ID, CREATORS_CREDENTIAL_SECRET, CREATORS_CREDENTIAL_VERSION, and CREATORS_PARTNER_TAG.');
+                    return [];
                 }
 
-                // API Key check
-                if (!process.env.AMAZON_ACCESS_KEY || process.env.AMAZON_ACCESS_KEY.includes('YOUR_KEY')) {
-                    console.log('[AMAZON_LOG] ⚠️ KEY_MISSING: Falling back to mock data');
-                    return amazonService.getMockData(cleanKeyword);
-                }
-
+                await respectCooldown();
                 lastApiHitTimestamp = Date.now();
-                console.log(`[AMAZON_LOG] 📡 API_REQUEST: Fetching "${cleanKeyword}" from PA-API`);
+                console.log(`[AMAZON_LOG] Searching Creators API for "${cleanKeyword}"`);
 
-                const commonParameters = {
-                    'AccessKey': process.env.AMAZON_ACCESS_KEY,
-                    'SecretKey': process.env.AMAZON_SECRET_KEY,
-                    'PartnerTag': process.env.AMAZON_PARTNER_TAG,
-                    'PartnerType': 'Associates',
-                    'Marketplace': 'www.amazon.com',
-                    'Region': 'us-east-1'
-                };
-                console.log(commonParameters);
+                const request = new SearchItemsRequestContent();
+                request.partnerTag = creatorsApi.getPartnerTag();
+                request.keywords = cleanKeyword;
+                request.searchIndex = 'PetSupplies';
+                request.itemCount = 10;
+                request.resources = [
+                    'images.primary.medium',
+                    'images.primary.large',
+                    'itemInfo.title',
+                    'offersV2.listings.price',
+                    'customerReviews.starRating',
+                    'customerReviews.count',
+                ];
 
-                const requestParameters = {
-                    'Keywords': cleanKeyword,
-                    'SearchIndex': 'PetSupplies',
-                    'ItemCount': 10,
-                    'Resources': [
-                        'ItemInfo.Title',
-                        'Images.Primary.Large',
-                        'Offers.Listings.Price',
-                        'CustomerReviews.Count',
-                        'CustomerReviews.StarRating'
-                    ]
-                };
+                const api = creatorsApi.getApi();
+                const data = await api.searchItems(creatorsApi.getMarketplace(), request);
+                const results = extractItems(data).map(mapItem).filter(Boolean);
 
-                const data = await AmazonPaapi.SearchItems(commonParameters, requestParameters);
-
-                console.log(`[AMAZON_LOG] ✅ API_RESPONSE: Received data from Amazon`);
-
-                if (!data || !data.SearchResult || !data.SearchResult.Items) {
-                    console.warn('[AMAZON_LOG] ⚠️ EMPTY_RESPONSE: Amazon search returned no items');
-                    return amazonService.getMockData(cleanKeyword);
-                }
-
-                const results = data.SearchResult.Items.map(item => ({
-                    id: item.ASIN,
-                    title: item.ItemInfo.Title.DisplayValue,
-                    image: item.Images.Primary.Large.URL,
-                    price: parseFloat((item.Offers?.Listings?.[0]?.Price?.DisplayAmount || '0').replace(/[^0-9.]/g, '')) || 0,
-                    rating: item.CustomerReviews?.StarRating || 'N/A',
-                    reviewsCount: item.CustomerReviews?.Count || 0,
-                    link: item.DetailPageURL
-                }));
-
-                console.log(`[AMAZON_LOG] 💾 CACHING: Stored ${results.length} items for "${cleanKeyword}"`);
-                myCache.set(cacheKey, results);
+                myCache.set(
+                    cacheKey,
+                    results,
+                    results.length > 0 ? CACHE_TTL_SECONDS : EMPTY_CACHE_TTL_SECONDS
+                );
                 return results;
-
             } catch (err) {
                 const errorMessage = err.message || String(err);
-                console.error('[AMAZON_LOG] ❌ API_ERROR:', errorMessage);
+                console.error('[AMAZON_LOG] Creators API error:', errorMessage);
 
-                // If it's an auth error, we might want to skip future calls for a while
-                if (errorMessage.includes('Unauthorized') || errorMessage.includes('Authentication')) {
-                    console.log('[AMAZON_LOG] 🛡️ AUTH_ERROR: Setting 1-hour global skip to prevent blocking');
-                    amazonService.isTemporarilyDisabled = true;
-                    setTimeout(() => { amazonService.isTemporarilyDisabled = false; }, 3600000);
+                if (/unauthorized|authentication|forbidden|401|403/i.test(errorMessage)) {
+                    circuitOpenUntil = Date.now() + 15 * 60 * 1000;
+                    console.warn('[AMAZON_LOG] Auth failed — pausing Amazon search for 15 minutes');
                 }
 
-                // ALWAYS return mock data on failure to prevent 500 errors
-                const mockResults = amazonService.getMockData(cleanKeyword);
+                if (/too many requests|throttle|429/i.test(errorMessage)) {
+                    circuitOpenUntil = Date.now() + 5 * 60 * 1000;
+                }
 
-                // CACHING THE FAILURE: Store mock results for 1 hour so we don't retry this keyword immediately
-                console.log(`[AMAZON_LOG] 💾 CACHING_MOCK: Storing fallback for "${cleanKeyword}" to avoid retries`);
-                myCache.set(cacheKey, mockResults, 3600);
-
-                return mockResults;
+                return [];
             } finally {
                 pendingRequests.delete(cacheKey);
             }
@@ -133,36 +148,6 @@ const amazonService = {
         pendingRequests.set(cacheKey, requestPromise);
         return requestPromise;
     },
-
-    getMockData: (q) => [
-        {
-            id: 'B08F2V1Y62',
-            title: `${q.charAt(0).toUpperCase() + q.slice(1)} Premium Nutritious Pet Food`,
-            image: 'https://images.unsplash.com/photo-1589924691995-400dc9ecc119?w=500',
-            price: 34.99,
-            rating: 4.8,
-            reviewsCount: 1250,
-            link: 'https://www.amazon.com/dp/B08F2V1Y62'
-        },
-        {
-            id: 'B07H8N3Q2G',
-            title: `${q.charAt(0).toUpperCase() + q.slice(1)} Interactive Durable Chew Toy`,
-            image: 'https://images.unsplash.com/photo-1576201836106-041d501f3c5e?w=500',
-            price: 12.50,
-            rating: 4.5,
-            reviewsCount: 890,
-            link: 'https://www.amazon.com/dp/B07H8N3Q2G'
-        },
-        {
-            id: 'B01N26A18Q',
-            title: `Orthopedic ${q.charAt(0).toUpperCase() + q.slice(1)} Bed for Dogs`,
-            image: 'https://images.unsplash.com/photo-1591946614421-1fbf121fca3c?w=500',
-            price: 89.00,
-            rating: 4.9,
-            reviewsCount: 2100,
-            link: 'https://www.amazon.com/dp/B01N26A18Q'
-        }
-    ]
 };
 
 module.exports = amazonService;

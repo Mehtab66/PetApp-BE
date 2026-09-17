@@ -6,13 +6,13 @@ function isConfigured() {
     const id = process.env.CREATORS_CREDENTIAL_ID || '';
     const secret = process.env.CREATORS_CREDENTIAL_SECRET || '';
     const version = process.env.CREATORS_CREDENTIAL_VERSION || '';
-    const partnerTag = process.env.CREATORS_PARTNER_TAG || '';
+    const partnerTag = getPartnerTag();
 
     if (!id || !secret || !version || !partnerTag) {
         return false;
     }
 
-    return ![id, secret, partnerTag].some((value) => PLACEHOLDER_PATTERN.test(value.trim()));
+    return ![id, secret].some((value) => PLACEHOLDER_PATTERN.test(value.trim()));
 }
 
 let cachedClient = null;
@@ -24,7 +24,11 @@ function getMarketplace() {
 }
 
 function getPartnerTag() {
-    return process.env.CREATORS_PARTNER_TAG || '';
+    const creatorsTag = (process.env.CREATORS_PARTNER_TAG || '').trim();
+    if (creatorsTag && !PLACEHOLDER_PATTERN.test(creatorsTag)) {
+        return creatorsTag;
+    }
+    return (process.env.AMAZON_PARTNER_TAG || '').trim();
 }
 
 function getApi() {
