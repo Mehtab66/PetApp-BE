@@ -1,6 +1,7 @@
 const MarketplaceItem = require('../models/MarketplaceItem');
 const amazonService = require('../services/amazonService');
 const creatorsApi = require('../config/creatorsApi');
+const { toMarketplaceItem } = require('../services/amazonItemMapper');
 
 /**
  * @desc    Get all marketplace items with filters
@@ -43,30 +44,9 @@ exports.getItems = async (req, res, next) => {
 
                 const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
                 const formattedAmazonItems = amazonProducts
-                    .filter(p => !existingAsins.has(p.id))
-                    .map(p => ({
-                        _id: `amazon_${p.id}`,
-                        asin: p.id,
-                        title: p.title,
-                        description: p.rating
-                            ? `Rated ${p.rating}⭐ by ${p.reviewsCount || 0} customers on Amazon.`
-                            : 'Amazon pet supply listing.',
-                        brand: p.brand || '',
-                        price: p.price,
-                        currency: 'USD',
-                        category: category && category !== 'All' ? category : 'Other',
-                        condition: 'New',
-                        images: [p.image].filter(Boolean),
-                        address: 'Online',
-                        affiliateLink: p.link,
-                        isAffiliate: true,
-                        rating: p.rating,
-                        reviewsCount: p.reviewsCount,
-                        prime: p.prime || false,
-                        source: 'creators-api',
-                        status: 'Available',
-                        views: 0,
-                        isExternal: true
+                    .filter(p => !existingAsins.has(p.id || p.asin))
+                    .map(p => toMarketplaceItem(p, {
+                        category: category && category !== 'All' ? category : undefined,
                     }));
 
                 items = [...items, ...formattedAmazonItems];
@@ -90,20 +70,18 @@ exports.getItems = async (req, res, next) => {
  */
 exports.getItem = async (req, res, next) => {
     try {
-        // External/live Amazon items have no DB record
+        // External/live Amazon items have no DB record — hydrate via Creators GetItems
         if (req.params.id.startsWith('amazon_')) {
+            const product = await amazonService.getProductByAsin(req.params.id);
+            if (!product) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Amazon product not found',
+                });
+            }
             return res.status(200).json({
                 success: true,
-                data: {
-                    item: {
-                        _id: req.params.id,
-                        isExternal: true,
-                        title: 'Amazon Product',
-                        description: 'Click "Buy on Amazon" to see full product details.',
-                        price: 0,
-                        images: []
-                    }
-                }
+                data: { item: toMarketplaceItem(product) },
             });
         }
 
@@ -275,17 +253,19 @@ exports.importSelectedProducts = async (req, res, next) => {
             const newItem = await MarketplaceItem.create({
                 asin: prod.id || prod.asin || null,
                 title: prod.title,
-                description: prod.description || `Rated ${prod.rating}⭐ by ${prod.reviewsCount || 0} customers on Amazon.`,
+                description: prod.description
+                    || (Array.isArray(prod.features) && prod.features.length ? prod.features.join('\n') : '')
+                    || `Rated ${prod.rating}⭐ by ${prod.reviewsCount || 0} customers on Amazon.`,
                 brand: prod.brand || '',
                 price: prod.price || 0,
                 currency: 'USD',
                 category: prod.category || 'Other',
-                images: prod.image ? [prod.image] : (prod.images || []),
+                images: (prod.images && prod.images.length) ? prod.images : (prod.image ? [prod.image] : []),
                 affiliateLink: prod.link || prod.affiliateLink || '',
                 rating: prod.rating || 0,
                 reviewsCount: prod.reviewsCount || 0,
                 prime: prod.prime || false,
-                source: 'pa-api',
+                source: 'creators-api',
                 status: 'Available',
                 lastSyncedAt: new Date(),
             });

@@ -2,6 +2,7 @@ const NodeCache = require('node-cache');
 const { SearchItemsRequestContent } = require('amazon-creators-api');
 const creatorsApi = require('../config/creatorsApi');
 const { getConditionConfig, getConditionKeys, buildKeywords } = require('./conditionCatalog');
+const { PRODUCT_RESOURCES, mapCreatorItem } = require('./amazonItemMapper');
 
 const CACHE_TTL_SECONDS = 45 * 60;
 const EMPTY_CACHE_TTL_SECONDS = 5 * 60;
@@ -35,81 +36,27 @@ function extractItems(response) {
     return searchResult.items || searchResult.Items || [];
 }
 
-function extractPrice(item) {
-    const listings = item?.offersV2?.listings || item?.OffersV2?.Listings || [];
-    const listing = listings[0];
-    if (!listing) return null;
-
-    const price = listing.price || listing.Price;
-    if (!price) return null;
-
-    const money = price.money || price.Money;
-    const displayAmount = money?.displayAmount || money?.DisplayAmount;
-    if (displayAmount) return displayAmount;
-
-    const amount = money?.amount ?? money?.Amount;
-    if (amount == null || amount === '') return null;
-
-    const numeric = Number(amount);
-    if (Number.isNaN(numeric)) return null;
-
-    const currency = money?.currency || money?.Currency || 'USD';
-    try {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(numeric);
-    } catch (_err) {
-        return `$${numeric.toFixed(2)}`;
-    }
-}
-
-function extractRating(item) {
-    const starRating = item?.customerReviews?.starRating || item?.CustomerReviews?.StarRating;
-    if (starRating == null) return null;
-    if (typeof starRating === 'number') return starRating;
-    const value = starRating.value ?? starRating.Value;
-    if (value == null || value === '') return null;
-    const numeric = Number(value);
-    return Number.isNaN(numeric) ? null : numeric;
-}
-
-function extractImage(item) {
-    const primary = item?.images?.primary || item?.Images?.Primary;
-    return (
-        primary?.large?.url ||
-        primary?.Large?.URL ||
-        primary?.medium?.url ||
-        primary?.Medium?.URL ||
-        primary?.small?.url ||
-        null
-    );
-}
-
-function buildAffiliateUrl(item) {
-    if (item?.detailPageURL) return item.detailPageURL;
-    if (item?.DetailPageURL) return item.DetailPageURL;
-
-    const asin = item?.asin || item?.ASIN;
-    if (!asin) return null;
-
-    const marketplace = creatorsApi.getMarketplace();
-    const tag = creatorsApi.getPartnerTag();
-    const tagQuery = tag ? `?tag=${encodeURIComponent(tag)}` : '';
-    return `https://${marketplace}/dp/${asin}${tagQuery}`;
-}
-
 function mapItem(item) {
-    const asin = item?.asin || item?.ASIN;
-    const title = item?.itemInfo?.title?.displayValue || item?.ItemInfo?.Title?.DisplayValue;
-    const url = buildAffiliateUrl(item);
-
-    if (!asin || !title || !url) return null;
+    const mapped = mapCreatorItem(item);
+    if (!mapped) return null;
 
     return {
-        asin,
-        title,
-        image: extractImage(item),
-        price: extractPrice(item),
-        rating: extractRating(item),
-        url,
+        asin: mapped.asin,
+        title: mapped.title,
+        image: mapped.image,
+        images: mapped.images,
+        price: mapped.priceDisplay,
+        rating: mapped.rating,
+        reviewsCount: mapped.reviewsCount,
+        url: mapped.link,
+        features: mapped.features,
+        description: mapped.description,
+        brand: mapped.brand,
+        availability: mapped.availability,
+        merchant: mapped.merchant,
+        condition: mapped.condition,
+        specs: mapped.specs,
+        savings: mapped.savings,
     };
 }
 
@@ -187,13 +134,7 @@ async function searchAmazon(conditionKey, petType) {
     request.keywords = keywords;
     request.searchIndex = config.searchIndex;
     request.itemCount = 8;
-    request.resources = [
-        'images.primary.medium',
-        'images.primary.large',
-        'itemInfo.title',
-        'offersV2.listings.price',
-        'customerReviews.starRating',
-    ];
+    request.resources = PRODUCT_RESOURCES;
 
     const response = await api.searchItems(creatorsApi.getMarketplace(), request);
 

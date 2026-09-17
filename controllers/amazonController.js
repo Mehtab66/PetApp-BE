@@ -33,10 +33,33 @@ exports.searchAmazon = async (req, res, next) => {
 };
 
 /**
- * @desc    Track click on affiliate link
- * @route   POST /api/amazon/click
+ * @desc    Get a single Amazon product by ASIN via Creators API GetItems
+ * @route   GET /api/amazon/items/:asin
  * @access  Private
  */
+exports.getAmazonItem = async (req, res, next) => {
+    try {
+        const product = await amazonService.getProductByAsin(req.params.asin);
+        if (!product) {
+            return res.status(404).json({
+                success: false,
+                message: 'Amazon product not found',
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: { product },
+        });
+    } catch (error) {
+        console.error('Amazon GetItem Controller Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch Amazon product details',
+        });
+    }
+};
+
 exports.trackClick = async (req, res, next) => {
     try {
         const { productId, productTitle, affiliateLink } = req.body;
