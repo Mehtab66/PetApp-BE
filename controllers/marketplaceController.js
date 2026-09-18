@@ -243,8 +243,6 @@ exports.searchAmazonProducts = async (req, res, next) => {
                 hasMore: Boolean(amazonPage.hasMore),
             }
         });
-            data: { products }
-        });
     } catch (error) {
         next(error);
     }
