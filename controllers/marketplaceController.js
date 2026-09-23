@@ -3,6 +3,13 @@ const amazonService = require('../services/amazonService');
 const creatorsApi = require('../config/creatorsApi');
 const { toMarketplaceItem } = require('../services/amazonItemMapper');
 const { buildPetSearch, rankAndFilter } = require('../services/petSearchQuery');
+const {
+    getOwnProducts,
+    isOwnBrand,
+    shouldShowOwnProducts,
+    mergeOwnProducts,
+} = require('../services/ownProducts');
+const { withAffiliateTag } = require('../services/affiliateLink');
 
 /**
  * @desc    Get all marketplace items with filters
@@ -11,8 +18,23 @@ const { buildPetSearch, rankAndFilter } = require('../services/petSearchQuery');
  */
 exports.getItems = async (req, res, next) => {
     try {
-        const { category, search, minPrice, maxPrice, sortBy, petType, petBreed, page } = req.query;
+        const { category, search, minPrice, maxPrice, sortBy, petType, petBreed, page, ownOnly } = req.query;
         const pageNum = Math.min(Math.max(parseInt(page, 10) || 1, 1), 10);
+        const onlyOwn = ownOnly === 'true' || ownOnly === '1';
+
+        if (onlyOwn) {
+            const ownItems = await getOwnProducts();
+            return res.status(200).json({
+                success: true,
+                count: ownItems.length,
+                data: {
+                    items: ownItems,
+                    ownItems,
+                    page: 1,
+                    hasMore: false,
+                },
+            });
+        }
 
         let items = [];
         if (pageNum === 1) {
@@ -32,10 +54,24 @@ exports.getItems = async (req, res, next) => {
             else if (sortBy === 'rating') sortOption = { rating: -1 };
 
             items = await MarketplaceItem.find(query).sort(sortOption);
+            items = items.map((doc) => {
+                const item = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+                if (isOwnBrand(item)) item.isOwnProduct = true;
+                return item;
+            });
         }
 
         const petSearch = buildPetSearch({ petType, petBreed, category, search });
         let hasMore = false;
+        let ownItems = [];
+
+        if (pageNum === 1 && shouldShowOwnProducts({ petType, search })) {
+            try {
+                ownItems = await getOwnProducts();
+            } catch (error) {
+                console.error('[MARKETPLACE] Failed to load own products:', error.message || error);
+            }
+        }
 
         if (!creatorsApi.isConfigured()) {
             console.warn('[MARKETPLACE] Skipping Amazon supplement — add CREATORS_* credentials to .env');
@@ -60,11 +96,19 @@ exports.getItems = async (req, res, next) => {
             const existingAsins = new Set(items.map(i => i.asin).filter(Boolean));
             const formattedAmazonItems = matchedAmazon
                 .filter(p => !existingAsins.has(p.id || p.asin))
-                .map(p => toMarketplaceItem(p, {
-                    category: category && category !== 'All' ? category : undefined,
-                }));
+                .map(p => {
+                    const mapped = toMarketplaceItem(p, {
+                        category: category && category !== 'All' ? category : undefined,
+                    });
+                    if (mapped && isOwnBrand(p)) mapped.isOwnProduct = true;
+                    return mapped;
+                });
 
             items = [...items, ...formattedAmazonItems];
+        }
+
+        if (ownItems.length) {
+            items = mergeOwnProducts(items, ownItems);
         }
 
         res.status(200).json({
@@ -72,6 +116,7 @@ exports.getItems = async (req, res, next) => {
             count: items.length,
             data: {
                 items,
+                ownItems,
                 page: pageNum,
                 hasMore,
             }
@@ -97,9 +142,11 @@ exports.getItem = async (req, res, next) => {
                     message: 'Amazon product not found',
                 });
             }
+            const item = toMarketplaceItem(product);
+            if (item && isOwnBrand(product)) item.isOwnProduct = true;
             return res.status(200).json({
                 success: true,
-                data: { item: toMarketplaceItem(product) },
+                data: { item },
             });
         }
 
@@ -289,7 +336,7 @@ exports.importSelectedProducts = async (req, res, next) => {
                 currency: 'USD',
                 category: prod.category || 'Other',
                 images: (prod.images && prod.images.length) ? prod.images : (prod.image ? [prod.image] : []),
-                affiliateLink: prod.link || prod.affiliateLink || '',
+                affiliateLink: withAffiliateTag(prod.link || prod.affiliateLink, prod.id || prod.asin),
                 rating: prod.rating || 0,
                 reviewsCount: prod.reviewsCount || 0,
                 prime: prod.prime || false,

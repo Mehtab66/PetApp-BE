@@ -1,3 +1,5 @@
+const { withAffiliateTag } = require('./affiliateLink');
+
 const PRODUCT_RESOURCES = [
     'browseNodeInfo.browseNodes',
     'customerReviews.starRating',
@@ -239,7 +241,7 @@ function toMarketplaceItem(product, extras = {}) {
         features: product.features || [],
         specs: product.specs || [],
         address: 'Online',
-        affiliateLink: product.link,
+        affiliateLink: withAffiliateTag(product.link, product.asin || product.id),
         isAffiliate: true,
         rating: product.rating,
         reviewsCount: product.reviewsCount || 0,
