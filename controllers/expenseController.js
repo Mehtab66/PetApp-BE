@@ -1,30 +1,5 @@
 const Expense = require('../models/Expense');
 const Pet = require('../models/Pet');
-const { processReceiptImage } = require('../services/receiptService');
-
-// Receipt image → Donut JSON → clean note. Image is not sent to the LLM.
-exports.processReceipt = async (req, res) => {
-    try {
-        if (!req.file?.buffer) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please choose a receipt photo.',
-            });
-        }
-
-        const receipt = await processReceiptImage(req.file.buffer);
-        return res.status(200).json({
-            success: true,
-            data: receipt,
-        });
-    } catch (error) {
-        return res.status(error.statusCode || 500).json({
-            success: false,
-            code: error.code,
-            message: error.message || 'Could not process this receipt.',
-        });
-    }
-};
 
 // Create new expense
 exports.createExpense = async (req, res, next) => {
